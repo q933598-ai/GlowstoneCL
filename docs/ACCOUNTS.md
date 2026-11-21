@@ -2,34 +2,24 @@
 
 GlowstoneCL supports two account types:
 
-- **Offline profile** — a local Java profile with a deterministic offline UUID. It can play offline-mode worlds and servers, but it does not authenticate to online-mode servers.
-- **Microsoft account** — Microsoft Device Code Flow, followed by Xbox Live, XSTS and Minecraft Services. GlowstoneCL checks the Minecraft Java entitlement (including supported PC Game Pass products) and retrieves the Minecraft profile before adding the account.
+- **Offline profile** — a local Java profile with a deterministic offline UUID. It can play offline-mode worlds and servers, but it does not authenticate to online-mode servers. Horizon Offline is a separate fork-specific runtime.
+- **Microsoft account** — Microsoft Device Code Flow through CrustCore, followed by Xbox Live, XSTS and Minecraft Services. CrustCore retrieves the Minecraft profile and resolves ownership, including PC Game Pass.
 
-Horizon requires a Microsoft/Xbox-backed Minecraft session. Offline profiles can be used with Minecraft Java only.
-
-## Register a Microsoft public client
-
-A Microsoft Application (client) ID is public configuration, not a secret. Do not create, embed or distribute a Client Secret for this desktop app.
-
-1. Open [Microsoft Entra app registrations](https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade).
-2. Register an application that supports personal Microsoft accounts.
-3. Copy the **Application (client) ID**.
-4. Open **Authentication** and enable **Allow public client flows** under Advanced settings.
-5. Save the application.
-6. Paste the Client ID into GlowstoneCL → Accounts → Microsoft account and save it.
-7. If Minecraft Services returns HTTP 403 or rejects the app registration, submit the Client ID for Minecraft Services approval using the [Minecraft application review form](https://aka.ms/mce-reviewappid). Approval is separate from creating the Entra application.
-
-GlowstoneCL uses the Microsoft consumers authority and requests `XboxLive.signin` and `offline_access`. Device Code Flow allows the user to approve sign-in in a browser without embedding a client secret.
-
-## Sign in
+## Browser sign-in
 
 1. Open GlowstoneCL → Accounts.
-2. Enter and save the Application (client) ID.
-3. Click **Войти через Microsoft**.
-4. GlowstoneCL opens the Microsoft verification page in your browser and displays the device code. Enter the code and sign in.
-5. Return to GlowstoneCL. Polling is already running in the background; the account is added automatically after Microsoft approves the session. The browser can be reopened from the sign-in panel if necessary.
-6. GlowstoneCL exchanges the Microsoft token through Xbox Live and XSTS, checks supported Java entitlement products, and retrieves the Minecraft Java profile.
-7. The account is added only after authentication and profile checks succeed, and becomes the selected account.
+2. Click **Войти через Microsoft**.
+3. GlowstoneCL opens the official Microsoft Launcher sign-in page in your browser with the device code already filled in.
+4. Sign in and approve the request in the browser. CrustCore waits for approval automatically; there is no need to return and press a confirmation button.
+5. After Microsoft completes Xbox Live, XSTS and Minecraft Services authentication, GlowstoneCL adds the Minecraft profile and selects it.
+
+By default GlowstoneCL uses CrustCore's official Minecraft Launcher public client ID. You do **not** need to register your own Microsoft Entra application for the standard sign-in.
+
+## Optional custom Microsoft Client ID
+
+The Accounts page allows a custom Microsoft Application (client) ID as an advanced option. Leave this field empty to use the official launcher client.
+
+A custom ID must be a public-client app that supports personal Microsoft accounts. Do not create, embed or distribute a Client Secret for this desktop app. If Minecraft Services refuses a custom registration with HTTP 403, the ID may need separate Minecraft Services approval through the [Minecraft application review form](https://aka.ms/mce-reviewappid). Changing from device-code to browser UX cannot bypass that service-side approval.
 
 ## Session lifecycle
 
@@ -43,8 +33,8 @@ GlowstoneCL uses the Microsoft consumers authority and requests `XboxLive.signin
 ## Common issues
 
 - **No Client ID:** create a public-client app registration and paste its Application (client) ID into GlowstoneCL.
-- **invalid_client / unauthorized_client:** verify the Client ID and that public client flows are enabled.
-- **HTTP 403 from Minecraft Services:** the Client ID may need Minecraft Services approval. Use the [application review form](https://aka.ms/mce-reviewappid).
+- **invalid_client / unauthorized_client with a custom ID:** verify the Client ID and that public client flows are enabled. Remove the custom ID to use the official Minecraft Launcher client.
+- **HTTP 403 using a custom Client ID:** the ID may need Minecraft Services approval. Use the [application review form](https://aka.ms/mce-reviewappid). Try leaving the custom Client ID field empty to use the official Minecraft Launcher client.
 - **Xbox Live / XSTS error:** verify that the account can use Xbox services and that family or age restrictions are not blocking access.
 - **Minecraft profile not found:** the account may not own Minecraft Java Edition, may lack a Java profile, or may have an entitlement that the services do not report to this app.
 - **Credential store unavailable:** the account profile may be visible, but the refresh token could not be saved. Restore access to Secret Service / Windows Credential Manager and sign in again.
