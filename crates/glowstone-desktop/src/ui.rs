@@ -95,7 +95,7 @@ pub enum Message {
     SetSkinModel(String, store::SkinModel),
     DeleteSkin(String),
     ApplySkin(String),
-    SkinApplied(String, Result<(), String>),
+    SkinApplied(String, String, Result<(), String>),
     MicrosoftSkinLoaded(String, Result<Option<(Vec<u8>, store::SkinModel)>, String>),
     RotateSkinPreview(f32),
     MicrosoftClientIdChanged(String),
@@ -658,26 +658,29 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     return iced::Task::none();
                 }
             };
+            let account_uuid = account.uuid.clone();
             app.notice = Some(format!("Загружаю «{}» в профиль Minecraft…", skin.name));
             return iced::Task::perform(
                 game::apply_microsoft_skin(account, app.client_id.clone(), path, skin.model),
-                move |result| Message::SkinApplied(id.clone(), result),
+                move |result| Message::SkinApplied(id.clone(), account_uuid, result),
             );
         }
-        Message::SkinApplied(id, result) => {
+        Message::SkinApplied(id, account_uuid, result) => {
             match result {
                 Ok(()) => {
-                    if let Some(account) = wardrobe_account(app).cloned() {
-                        match store::set_active_skin(&account.uuid, &id) {
-                            Ok(collection) => {
+                    match store::set_active_skin(&account_uuid, &id) {
+                        Ok(collection) => {
+                            let is_current = wardrobe_account(app)
+                                .is_some_and(|account| account.uuid == account_uuid);
+                            if is_current {
                                 app.wardrobe_skins = collection.skins;
                                 app.wardrobe_active_skin_id = collection.active_skin_id;
                                 app.wardrobe_selected_skin_id = Some(id);
                                 refresh_skin_preview(app);
-                                app.notice = Some("Скин загружен в официальный Minecraft-профиль. При следующем обновлении профиля он будет виден в игре и на других устройствах.".into());
                             }
-                            Err(error) => app.notice = Some(format!("Скин отправлен в Minecraft, но не удалось обновить локальный выбор: {error}")),
+                            app.notice = Some("Скин загружен в официальный Minecraft-профиль. При следующем обновлении профиля он будет виден в игре и на других устройствах.".into());
                         }
+                        Err(error) => app.notice = Some(format!("Скин отправлен в Minecraft, но не удалось обновить локальный выбор: {error}")),
                     }
                 }
                 Err(error) => app.notice = Some(error),
