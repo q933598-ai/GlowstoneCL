@@ -1464,7 +1464,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
 }
 
 pub fn subscription(app: &App) -> iced::Subscription<Message> {
-    if app.page == Page::Wardrobe {
+    if app.page == Page::Wardrobe && app.wardrobe_active_skin_id.is_some() {
         iced::time::every(std::time::Duration::from_millis(110))
             .map(|_| Message::WardrobeAnimationTick)
     } else if app.launch_busy.is_some() {
