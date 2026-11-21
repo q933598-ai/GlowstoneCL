@@ -15,7 +15,7 @@ jobs:
       - name: Install Wayland and X11 build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libvulkan1
+          sudo apt-get install -y libwayland-dev libxkbcommon-dev libdbus-1-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libvulkan1
       - run: cargo fmt --all
       - run: cargo check --workspace --all-targets
       - run: cargo test --workspace
