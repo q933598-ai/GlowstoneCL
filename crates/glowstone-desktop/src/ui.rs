@@ -352,11 +352,15 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                         instance.state = InstanceState::Ready;
                     }
                     let save_error = store::save(&app.data).err();
-                    let exit_text = match outcome.exit_code {
+                    let mut exit_text = match outcome.exit_code {
                         Some(0) => "Игра завершилась штатно.".to_owned(),
                         Some(code) => format!("Игра завершилась с кодом {code}. Файлы сборки установлены."),
                         None => "Игровой процесс завершился. Файлы сборки установлены.".to_owned(),
                     };
+                    if let Some(notice) = outcome.notice {
+                        exit_text.push(' ');
+                        exit_text.push_str(&notice);
+                    }
                     app.notice = Some(match save_error {
                         Some(error) => format!("{exit_text} Не удалось сохранить состояние сборки: {error}"),
                         None => exit_text,
