@@ -236,6 +236,10 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             }
         }
         Message::DeleteInstance(id) => {
+            if app.launch_busy.as_deref() == Some(id.as_str()) {
+                app.notice = Some("Нельзя удалить сборку, пока она запущена.".into());
+                return iced::Task::none();
+            }
             match store::remove_instance(&id) {
                 Ok(()) => {
                     app.data.instances.retain(|instance| instance.id.0 != id);
