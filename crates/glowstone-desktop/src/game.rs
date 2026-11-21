@@ -51,8 +51,15 @@ impl HorizonFlavor {
 
     fn release_api(self) -> &'static str {
         match self {
-            Self::Official => HORIZON_NIGHTLY_API,
-            Self::Offline => HORIZON_OFFLINE_NIGHTLY_API,
+            Self::Official => "https://api.github.com/repos/horizon-rust/horizon/releases?per_page=100",
+            Self::Offline => "https://api.github.com/repos/gerdaroot/Horizon-Offline-Launcher/releases?per_page=100",
+        }
+    }
+
+    fn catalog_cache_name(self) -> &'static str {
+        match self {
+            Self::Official => "horizon-official.json",
+            Self::Offline => "horizon-offline.json",
         }
     }
 
@@ -205,17 +212,7 @@ async fn fetch_horizon_version_choices(
     cache_path: &Path,
     flavor: HorizonFlavor,
 ) -> Result<Vec<VersionChoice>, String> {
-    let value = fetch_json_cached(
-        client,
-        &format!("https://api.github.com/repos/{}/releases?per_page=100", match flavor {
-            HorizonFlavor::Official => "horizon-rust/horizon",
-            HorizonFlavor::Offline => "gerdaroot/Horizon-Offline-Launcher",
-        }),
-        cache_path,
-    )
-    .await?;
-    let releases: Vec<GithubRelease> = serde_json::from_value(value)
-        .map_err(|error| format!("Список релизов Horizon повреждён: {error}"))?;
+    let releases = fetch_horizon_releases(client, cache_path, flavor).await?;
     let asset_name = horizon_asset_name()?;
     let mut choices = vec![VersionChoice {
         id: "stable".to_owned(),
@@ -401,16 +398,6 @@ fn java_version_selector(input: &str) -> String {
     }
 }
 
-fn validate_horizon_version(requested: &str, pinned: &str) -> Result<(), String> {
-    match requested.trim().to_ascii_lowercase().as_str() {
-        "stable" | "latest" | "horizon" => Ok(()),
-        _ if requested.trim() == pinned => Ok(()),
-        _ => Err(format!(
-            "Эта версия Horizon привязана к Minecraft {pinned}, а в сборке указана версия {}. Укажи {pinned} или «latest».",
-            requested.trim()
-        )),
-    }
-}
 
 #[derive(Debug, Deserialize)]
 struct GithubRelease {
@@ -485,9 +472,20 @@ async fn launch_horizon(
         .build()
         .map_err(|error| error.to_string())?;
 
-    let build = ensure_horizon_build(&client, &data_root, flavor).await?;
+    let build = ensure_horizon_build(
+        &client,
+        &data_root,
+        flavor,
+        &instance.game_version,
+    )
+    .await?;
     let pins = build.pins()?;
-    validate_horizon_version(&instance.game_version, &pins.version)?;
+    if flavor == HorizonFlavor::Offline && (pins.version != "26.3" || pins.java_major != 25) {
+        return Err(format!(
+            "Эта сборка Horizon Offline рассчитана на Minecraft 26.3 и Java 25, а выбранный runtime закрепляет Minecraft {} / Java {}.",
+            pins.version, pins.java_major
+        ));
+    }
 
     let client_api = query_launch_api(&build.client(), &build.directory).await?;
     let client_version = client_api["minecraft"]
@@ -605,23 +603,25 @@ async fn ensure_horizon_build(
     client: &reqwest::Client,
     data_root: &Path,
     flavor: HorizonFlavor,
+    requested_version: &str,
 ) -> Result<HorizonBuild, String> {
     let versions_dir = data_root.join(flavor.storage_name()).join("versions");
     fs::create_dir_all(&versions_dir)
         .map_err(|error| format!("Не удалось создать каталог Horizon: {error}"))?;
 
-    let existing = installed_horizon_build(&versions_dir, flavor);
-    let release_result = fetch_horizon_release(client, flavor).await;
-    let release = match release_result {
-        Ok(release) => release,
+    let asset_name = horizon_asset_name()?;
+    let cache_path = data_root.join("version-catalog").join(flavor.catalog_cache_name());
+    let releases = match fetch_horizon_releases(client, &cache_path, flavor).await {
+        Ok(releases) => releases,
         Err(error) => {
-            return existing.ok_or_else(|| {
-                format!("Не удалось получить Horizon с GitHub, и локальной версии нет: {error}")
-            });
+            if let Some(existing) = installed_horizon_build(&versions_dir, flavor, requested_version) {
+                return Ok(existing);
+            }
+            return Err(format!("Не удалось получить список релизов Horizon: {error}"));
         }
     };
-    let asset_name = horizon_asset_name()?;
-    let version = nightly_version(&release)?;
+    let release = select_horizon_release(&releases, requested_version, asset_name)?;
+    let version = horizon_release_version(release)?;
     let target = versions_dir.join(&version);
     if target.join(HORIZON_INSTALLED_MARKER).is_file() {
         let candidate = HorizonBuild {
@@ -648,10 +648,12 @@ async fn ensure_horizon_build(
             .ok_or_else(|| format!("В релизе Horizon отсутствует файл {name}."))
     };
     let sums_url = find_asset("SHA256SUMS")?;
-    // Nightly releases are signed for their exact date+commit identity.
-    // The channel signature (SHA256SUMS.sig) is retained only for older
-    // launchers and must not be used to accept a new Nightly build.
-    let signature_url = find_asset("SHA256SUMS.v2.sig")?;
+    let (signature_asset, signature_context) = if release.title.starts_with("Nightly ") {
+        ("SHA256SUMS.v2.sig", version.as_str())
+    } else {
+        ("SHA256SUMS.sig", release.tag_name.as_str())
+    };
+    let signature_url = find_asset(signature_asset)?;
     let archive_url = find_asset(asset_name)?;
 
     let (sums_response, signature_response) = tokio::try_join!(
@@ -671,7 +673,7 @@ async fn ensure_horizon_build(
         .text()
         .await
         .map_err(|error| error.to_string())?;
-    verify_horizon_signature(&version, &sums, &signature, flavor)?;
+    verify_horizon_signature(signature_context, &sums, &signature, flavor)?;
 
     let expected_sha256 = expected_sha256(&sums, asset_name)?;
     let archive_response = client
@@ -739,7 +741,11 @@ async fn ensure_horizon_build(
     Ok(HorizonBuild { version, directory: target, flavor })
 }
 
-fn installed_horizon_build(versions_dir: &Path, flavor: HorizonFlavor) -> Option<HorizonBuild> {
+fn installed_horizon_build(
+    versions_dir: &Path,
+    flavor: HorizonFlavor,
+    requested_version: &str,
+) -> Option<HorizonBuild> {
     let mut versions: Vec<_> = fs::read_dir(versions_dir)
         .ok()?
         .filter_map(Result::ok)
@@ -750,27 +756,47 @@ fn installed_horizon_build(versions_dir: &Path, flavor: HorizonFlavor) -> Option
     versions.reverse();
     versions.into_iter().find_map(|directory| {
         let version = directory.file_name()?.to_string_lossy().into_owned();
+        if !is_latest_alias(requested_version) && version != requested_version {
+            return None;
+        }
         let build = HorizonBuild { version, directory, flavor };
         (build.client().is_file() && build.preparer().is_file() && build.pins().is_ok())
             .then_some(build)
     })
 }
 
-async fn fetch_horizon_release(
+fn is_latest_alias(version: &str) -> bool {
+    matches!(version.trim().to_ascii_lowercase().as_str(), "" | "stable" | "latest" | "horizon")
+}
+
+async fn fetch_horizon_releases(
     client: &reqwest::Client,
+    cache_path: &Path,
     flavor: HorizonFlavor,
-) -> Result<GithubRelease, String> {
-    client
-        .get(flavor.release_api())
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|error| format!("GitHub недоступен: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("GitHub вернул ошибку: {error}"))?
-        .json::<GithubRelease>()
-        .await
-        .map_err(|error| format!("GitHub вернул некорректный релиз Horizon: {error}"))
+) -> Result<Vec<GithubRelease>, String> {
+    let value = fetch_json_cached(client, flavor.release_api(), cache_path).await?;
+    serde_json::from_value(value)
+        .map_err(|error| format!("Список релизов Horizon повреждён: {error}"))
+}
+
+fn select_horizon_release<'a>(
+    releases: &'a [GithubRelease],
+    requested_version: &str,
+    asset_name: &str,
+) -> Result<&'a GithubRelease, String> {
+    let eligible = releases.iter().filter(|release| {
+        release.assets.iter().any(|asset| asset.name == asset_name)
+            && horizon_release_version(release).is_ok()
+    });
+    if is_latest_alias(requested_version) {
+        return eligible.into_iter().next().ok_or_else(|| {
+            format!("GitHub не опубликовал сборку Horizon для этой платформы ({asset_name}).")
+        });
+    }
+    eligible
+        .into_iter()
+        .find(|release| horizon_release_version(release).is_ok_and(|id| id == requested_version))
+        .ok_or_else(|| format!("В доступных релизах Horizon нет версии {requested_version}."))
 }
 
 fn horizon_asset_name() -> Result<&'static str, String> {
@@ -786,9 +812,6 @@ fn horizon_asset_name() -> Result<&'static str, String> {
 }
 
 fn nightly_version(release: &GithubRelease) -> Result<String, String> {
-    // Horizon's v2 signature binds a Nightly to the date and commit in its
-    // release title. Never infer this identity from GitHub's publication time:
-    // that would let an old artifact be presented under a newer timestamp.
     let title = release
         .title
         .strip_prefix("Nightly ")
@@ -806,6 +829,20 @@ fn nightly_version(release: &GithubRelease) -> Result<String, String> {
     }
     let commit = commit.to_ascii_lowercase();
     Ok(format!("nightly-{date}-{commit}"))
+}
+
+fn horizon_release_version(release: &GithubRelease) -> Result<String, String> {
+    if release.title.starts_with("Nightly ") {
+        return nightly_version(release);
+    }
+    let tag = release.tag_name.trim();
+    if tag.is_empty()
+        || tag.len() > 80
+        || !tag.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'@'))
+    {
+        return Err("GitHub вернул некорректный tag Horizon.".to_owned());
+    }
+    Ok(tag.to_owned())
 }
 
 fn valid_date(value: &str) -> bool {
