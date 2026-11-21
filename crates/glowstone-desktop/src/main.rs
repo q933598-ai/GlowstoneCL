@@ -3,6 +3,7 @@
 mod auth;
 mod game;
 mod store;
+mod skin_preview;
 mod ui;
 
 fn main() -> iced::Result {
