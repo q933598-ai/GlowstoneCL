@@ -376,6 +376,81 @@ pub async fn apply_microsoft_skin(
     Ok(())
 }
 
+/// Reads the currently active skin from an authenticated Microsoft profile.
+pub async fn fetch_microsoft_skin(
+    account: AccountProfile,
+    microsoft_client_id: String,
+) -> Result<Option<(Vec<u8>, SkinModel)>, String> {
+    if account.kind != AccountKind::Microsoft {
+        return Ok(None);
+    }
+
+    let refresh_token = store::load_refresh_token(&account.id)?;
+    let refreshed = auth::refresh_game_account(
+        microsoft_client_id,
+        &account,
+        refresh_token,
+    ).await?;
+
+    if refreshed.kind() != AccountType::Xbox {
+        return Err("Microsoft-сессия не содержит действующий Minecraft access token.".to_owned());
+    }
+    if let Some(rotated) = refreshed.refresh_token.as_deref() {
+        store::store_refresh_token(&account.id, rotated)?;
+    }
+
+    let client = reqwest::Client::new();
+    let profile_response = client
+        .get("https://api.minecraftservices.com/minecraft/profile")
+        .bearer_auth(&refreshed.access_token)
+        .send()
+        .await
+        .map_err(|error| format!("Не удалось получить скин Minecraft-профиля: {error}"))?;
+    let status = profile_response.status();
+    let profile: Value = profile_response
+        .json()
+        .await
+        .map_err(|error| format!("Minecraft Services вернул некорректный профиль: {error}"))?;
+    if !status.is_success() {
+        return Err(format!("Не удалось прочитать Minecraft-профиль (HTTP {status})."));
+    }
+
+    let skins = profile["skins"].as_array().ok_or_else(|| {
+        "Minecraft Services не вернул список скинов профиля.".to_owned()
+    })?;
+    let active = skins.iter()
+        .find(|skin| skin["state"].as_str() == Some("ACTIVE"))
+        .or_else(|| skins.first());
+    let Some(active) = active else {
+        return Ok(None);
+    };
+    let Some(url) = active["url"].as_str() else {
+        return Ok(None);
+    };
+    let model = match active["variant"].as_str().unwrap_or("CLASSIC").to_ascii_uppercase().as_str() {
+        "SLIM" => SkinModel::Slim,
+        _ => SkinModel::Classic,
+    };
+
+    let skin_response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| format!("Не удалось скачать текстуру из Minecraft-профиля: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("Сервер текстуры Minecraft вернул ошибку: {error}"))?;
+    let bytes = skin_response
+        .bytes()
+        .await
+        .map_err(|error| format!("Не удалось прочитать текстуру Minecraft: {error}"))?
+        .to_vec();
+    if bytes.is_empty() || bytes.len() > 2 * 1024 * 1024 {
+        return Err("Minecraft Services вернул пустую или слишком большую текстуру.".to_owned());
+    }
+
+    Ok(Some((bytes, model)))
+}
+
 async fn launch_java(
     instance: GameInstance,
     data_root: PathBuf,
