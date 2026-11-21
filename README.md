@@ -25,7 +25,7 @@ The `test/glowstonecl` branch includes:
 - Microsoft browser sign-in through CrustCore using the official Minecraft Launcher public client by default (optional custom Client ID), followed by Xbox Live, XSTS and Minecraft Services, including ownership / Game Pass checks;
 - Microsoft refresh-token storage in the operating system credential store, with session refresh before launching a game;
 - offline profiles for Java offline-mode play and the separate Horizon Offline fork;
-- a local offline-skin wardrobe with per-profile PNG storage (64×64 and legacy 64×32), texture preview, rename, active selection and deletion. Skins stay on the device and do not modify Microsoft profiles.
+- a skin wardrobe for offline and Microsoft profiles, with per-profile PNG collections, current-skin sync for Microsoft accounts, official Minecraft Services upload, and a textured rotatable 3D player preview. Offline skins remain local and need a compatible client-side skin mod to appear in game.
 
 The Horizon game binary is currently provided for **Linux x86_64** and **Windows x64**. The Java backend supports the platform/runtime combinations provided by CrustCore.
 
@@ -35,7 +35,7 @@ The Horizon game binary is currently provided for **Linux x86_64** and **Windows
 - in-app mod and modpack installation, updates and dependency resolution;
 - a detailed download queue/progress view and log/crash-report browser;
 - import/export of complete instances and packaged installers for GlowstoneCL;
-- 3D player preview and applying local skins inside an unmodified Minecraft client. The current wardrobe is a local texture library/preview; it does not yet inject a skin renderer into the game.
+- automatic in-game custom skin support for offline profiles in an unmodified Vanilla client. Offline accounts can store and preview skins locally, but Vanilla does not fetch a launcher-local texture; this requires a compatible client mod.
 
 Java, official Horizon and Horizon Offline remain separate runtimes: Java JAR mods are not automatically Horizon mods, and the offline fork is not interchangeable with the official client.
 
