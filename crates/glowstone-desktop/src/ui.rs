@@ -13,22 +13,22 @@ use crate::horizon_mods;
 use crate::mods;
 use crate::store::{self, AccountKind, AccountProfile, PersistedState};
 
-const BG: Color = Color::from_rgb8(10, 15, 26);
-const SIDEBAR: Color = Color::from_rgba(0.055, 0.085, 0.15, 0.94);
-const PANEL: Color = Color::from_rgba(0.09, 0.13, 0.21, 0.88);
-const PANEL_LIGHT: Color = Color::from_rgba(0.15, 0.20, 0.31, 0.72);
-const TEXT: Color = Color::from_rgb8(242, 246, 252);
-const MUTED: Color = Color::from_rgb8(164, 177, 198);
-const SUBTLE: Color = Color::from_rgb8(119, 137, 164);
-const CYAN: Color = Color::from_rgb8(105, 218, 235);
-const CYAN_DARK: Color = Color::from_rgb8(17, 47, 64);
-const PURPLE: Color = Color::from_rgb8(164, 133, 255);
-const GREEN: Color = Color::from_rgb8(105, 225, 126);
-const ORANGE: Color = Color::from_rgb8(255, 157, 94);
-const RED: Color = Color::from_rgb8(255, 112, 125);
-const EDGE: Color = Color::from_rgba(0.76, 0.86, 1.0, 0.16);
-const EDGE_BRIGHT: Color = Color::from_rgba(0.43, 0.83, 1.0, 0.58);
-const DIVIDER: Color = Color::from_rgba(0.72, 0.82, 0.95, 0.13);
+const BG: Color = Color::from_rgb8(237, 239, 242);
+const SIDEBAR: Color = Color::from_rgba(0.97, 0.975, 0.985, 0.91);
+const PANEL: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.73);
+const PANEL_LIGHT: Color = Color::from_rgba(0.94, 0.96, 0.975, 0.84);
+const TEXT: Color = Color::from_rgb8(47, 54, 62);
+const MUTED: Color = Color::from_rgb8(104, 114, 126);
+const SUBTLE: Color = Color::from_rgb8(137, 146, 157);
+const CYAN: Color = Color::from_rgb8(80, 145, 164);
+const CYAN_DARK: Color = Color::from_rgb8(218, 234, 238);
+const PURPLE: Color = Color::from_rgb8(142, 127, 170);
+const GREEN: Color = Color::from_rgb8(93, 151, 111);
+const ORANGE: Color = Color::from_rgb8(191, 137, 94);
+const RED: Color = Color::from_rgb8(190, 101, 111);
+const EDGE: Color = Color::from_rgba(0.31, 0.39, 0.47, 0.15);
+const EDGE_BRIGHT: Color = Color::from_rgba(0.35, 0.62, 0.71, 0.46);
+const DIVIDER: Color = Color::from_rgba(0.35, 0.42, 0.49, 0.14);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -1239,19 +1239,19 @@ impl<Message> canvas::Program<Message> for GlowBackdrop {
             &mut frame,
             iced::Point::new(bounds.width * 0.72, bounds.height * 0.12),
             440.0,
-            Color::from_rgb8(45, 89, 174),
+            Color::from_rgb8(183, 208, 216),
         );
         draw_glow(
             &mut frame,
             iced::Point::new(bounds.width * 0.42, bounds.height * 0.95),
             360.0,
-            Color::from_rgb8(81, 61, 157),
+            Color::from_rgb8(211, 202, 224),
         );
         draw_glow(
             &mut frame,
             iced::Point::new(bounds.width * 0.98, bounds.height * 0.72),
             280.0,
-            Color::from_rgb8(38, 121, 166),
+            Color::from_rgb8(184, 218, 216),
         );
         vec![frame.into_geometry()]
     }
@@ -1270,7 +1270,7 @@ fn draw_glow(frame: &mut canvas::Frame, center: iced::Point, radius: f32, color:
 fn sidebar(app: &App) -> Element<'_, Message> {
     let brand = container(
         row![
-            container(icon("diamond", CYAN, 24.0))
+            container(icon("glowstone", ORANGE, 25.0))
                 .width(48)
                 .height(48)
                 .align_x(Alignment::Center)
@@ -1287,7 +1287,7 @@ fn sidebar(app: &App) -> Element<'_, Message> {
     )
     .padding(12)
     .width(Length::Fill)
-    .style(|_| glass_style(Color::from_rgba(0.08, 0.12, 0.21, 0.68), EDGE));
+    .style(|_| glass_style(Color::from_rgba(1.0, 1.0, 1.0, 0.72), EDGE));
 
     let library = column![
         section_label("БИБЛИОТЕКА"),
@@ -1440,7 +1440,7 @@ fn nav_button(
 ) -> Element<'static, Message> {
     let active = page == current;
     let background = if active {
-        Color::from_rgba(0.19, 0.42, 0.62, 0.58)
+        Color::from_rgba(0.80, 0.89, 0.92, 0.92)
     } else {
         Color::TRANSPARENT
     };
@@ -1494,7 +1494,7 @@ fn platform_nav(
         let mut style = button::text(theme, status);
         style.background = Some(
             if active {
-                Color::from_rgba(0.15, 0.24, 0.33, 0.48)
+                Color::from_rgba(0.90, 0.93, 0.96, 0.82)
             } else {
                 Color::TRANSPARENT
             }
@@ -1523,7 +1523,7 @@ fn top_bar(app: &App) -> Element<'_, Message> {
     )
     .padding([2, 14])
     .width(Length::Fill)
-    .style(|_| glass_style(Color::from_rgba(0.18, 0.22, 0.34, 0.68), EDGE));
+    .style(|_| glass_style(Color::from_rgba(1.0, 1.0, 1.0, 0.77), EDGE));
 
     row![
         search,
@@ -1711,7 +1711,7 @@ fn hero_banner(app: &App) -> Element<'_, Message> {
     .width(Length::Fill)
     .height(Length::Fill)
     .style(|_| container::Style {
-        background: Some(Color::from_rgba(0.025, 0.045, 0.085, 0.47).into()),
+        background: Some(Color::from_rgba(0.14, 0.18, 0.23, 0.40).into()),
         border: Border::default().rounded(18).width(1).color(EDGE),
         text_color: Some(TEXT),
         ..Default::default()
@@ -3793,6 +3793,26 @@ fn icon(
     );
 
     let markup = match name {
+        "glowstone" => format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+                <defs>
+                    <linearGradient id="glow-face" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0" stop-color="#FFF4AF"/>
+                        <stop offset=".52" stop-color="#F6C96C"/>
+                        <stop offset="1" stop-color="#D58C3F"/>
+                    </linearGradient>
+                    <radialGradient id="glow-halo">
+                        <stop offset="0" stop-color="#FFE7A0" stop-opacity=".52"/>
+                        <stop offset="1" stop-color="#FFE7A0" stop-opacity="0"/>
+                    </radialGradient>
+                </defs>
+                <circle cx="16" cy="16" r="15" fill="url(#glow-halo)"/>
+                <path d="m16 2.8 12 6.8v13.1L16 29.5 4 22.7V9.6L16 2.8Z" fill="url(#glow-face)" stroke="#C58B49" stroke-width="1.1"/>
+                <path d="m4 9.6 12 6.9 12-6.9M16 16.5v13" fill="none" stroke="#FFF8D4" stroke-width="1.1" opacity=".9"/>
+                <path d="m8 7.4 4 2.2-2 3.5-4-2.3 2-3.4Zm12 1 4-2.2 2 3.5-4 2.3-2-3.6Zm-7 8.1 3-1.8 3 1.8-3 2-3-2Zm-2 7.6 3-1.7 2 3.5-3 1.7-2-3.5Zm8 .1 3-1.7 2 3.5-3 1.7-2-3.5Z" fill="#FFF3B5" opacity=".9"/>
+                <path d="m10 5.9 1.3-2.3 1.2 2.3 2.4 1.2-2.4 1.3-1.2 2.3-1.3-2.3-2.3-1.3L10 5.9Zm12 11 1-1.8 1 1.8 1.9 1-1.9 1-1 1.8-1-1.8-1.8-1 1.8-1Z" fill="#FFFCE8"/>
+            </svg>"##
+        ),
         "diamond" => format!(
             r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
                 <defs>
