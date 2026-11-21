@@ -290,11 +290,12 @@ fn validate_skin_png(bytes: &[u8]) -> Result<bool, String> {
     let mut reader = decoder
         .read_info()
         .map_err(|error| format!("Не удалось прочитать PNG: {error}"))?;
-    let info = reader.info();
-    if info.width != 64 || !matches!(info.height, 64 | 32) {
+    let width = reader.info().width;
+    let height = reader.info().height;
+    if width != 64 || !matches!(height, 64 | 32) {
         return Err(format!(
             "Неверный размер скина: {}×{}. Поддерживаются PNG 64×64 и 64×32.",
-            info.width, info.height
+            width, height
         ));
     }
 
@@ -303,7 +304,7 @@ fn validate_skin_png(bytes: &[u8]) -> Result<bool, String> {
         .next_frame(&mut decoded)
         .map_err(|error| format!("PNG повреждён или не может быть декодирован: {error}"))?;
 
-    Ok(info.height == 32)
+    Ok(height == 32)
 }
 
 fn skin_file_path(account_uuid: &str, skin_id: &str) -> Result<PathBuf, String> {
