@@ -2172,6 +2172,11 @@ fn instance_card(instance: &GameInstance, selected: bool) -> Element<'static, Me
         InstanceState::Updating => "Обновляется",
     };
     let account_id = instance.id.0.clone();
+    let mods_action: Element<'static, Message> = if supports_mod_catalog(instance) {
+        quiet_button("Моды", Message::OpenInstanceMods(account_id.clone()))
+    } else {
+        status_chip("VANILLA", PANEL_LIGHT, MUTED)
+    };
 
     container(
         row![
@@ -2199,6 +2204,7 @@ fn instance_card(instance: &GameInstance, selected: bool) -> Element<'static, Me
             } else {
                 quiet_button("Выбрать", Message::SelectInstance(account_id.clone()))
             },
+            mods_action,
             button(icon("play", CYAN, 15.0))
                 .on_press(Message::LaunchInstance(account_id.clone()))
                 .width(36)
@@ -2871,8 +2877,8 @@ fn horizon_catalog_page(app: &App) -> Element<'_, Message> {
             button(text(label).size(9).color(if active { CYAN } else { TEXT }))
                 .on_press(Message::ModTargetSelected(instance.id.0.clone()))
                 .padding([8, 11])
-                .style(move |theme, _status| {
-                    let mut style = button::secondary(theme, button::Status::Active);
+                .style(move |theme, status| {
+                    let mut style = button::secondary(theme, status);
                     style.background = Some(if active { CYAN_DARK } else { PANEL_LIGHT }.into());
                     style.text_color = if active { CYAN } else { TEXT };
                     style.border = Border::default().rounded(9).width(1).color(if active { EDGE_BRIGHT } else { EDGE });
