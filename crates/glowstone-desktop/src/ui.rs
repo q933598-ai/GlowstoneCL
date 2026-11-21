@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, text, vertical_space};
+use iced::widget::{button, column, container, row, text, Space};
 use iced::{Alignment, Element, Length};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,10 +108,10 @@ fn sidebar(app: &App) -> Element<'_, Message> {
         ]
         .align_y(Alignment::Center)
         .spacing(8),
-        vertical_space().height(24),
+        Space::new().height(24),
         text("РАЗДЕЛЫ").size(10),
         nav,
-        vertical_space().height(Length::Fill),
+        Space::new().height(Length::Fill),
         text("EARLY DEVELOPMENT · 0.1.0").size(9),
         button("⚙   Настройки")
             .on_press(Message::Navigate(Page::Settings))
@@ -186,7 +186,7 @@ fn home_page(app: &App) -> Element<'_, Message> {
     let mut content = column![
         text("Добро пожаловать в GlowstoneCL").size(28),
         text("Один лаунчер для Minecraft Java и Horizon.").size(14),
-        vertical_space().height(8),
+        Space::new().height(8),
         text("ИГРОВАЯ ПЛАТФОРМА").size(10),
         row![
             button("Minecraft Java")
@@ -267,7 +267,7 @@ fn empty_page(
     column![
         text(title).size(27),
         text(description).size(13),
-        vertical_space().height(20),
+        Space::new().height(20),
         container(
             column![
                 text(empty_title).size(18),
@@ -301,7 +301,7 @@ fn settings_page() -> Element<'static, Message> {
     column![
         text("Настройки").size(27),
         text("Параметры лаунчера и игровой среды.").size(13),
-        vertical_space().height(12),
+        Space::new().height(12),
         container(
             column![
                 text("ОКОННАЯ СИСТЕМА LINUX").size(10),
