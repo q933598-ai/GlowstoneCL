@@ -27,7 +27,8 @@ A custom ID must be a public-client app that supports personal Microsoft account
 - The short-lived Minecraft access token is held in memory and is not written to `state.json`.
 - Before starting a game, GlowstoneCL refreshes the Microsoft/Xbox/Minecraft session through CrustCore. When Microsoft rotates the refresh token, GlowstoneCL stores the new value in the credential store.
 - Java receives the authenticated account through CrustCore's Java launch pipeline.
-- Horizon receives the Minecraft session over the launch process's standard input (`--session-stdin`); the access token is not placed in command-line arguments.
+- Official Horizon receives the Minecraft session over the launch process's standard input (`--session-stdin`); the access token is not placed in command-line arguments.
+- Horizon Offline receives no Microsoft session; the local nickname is written to `horizon-player.txt` in the instance game directory.
 - Deleting an account removes its stored refresh token from the credential store.
 
 ## Common issues
