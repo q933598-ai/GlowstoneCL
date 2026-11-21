@@ -64,6 +64,10 @@ pub enum Message {
     SearchChanged(String),
     InstanceNameChanged(String),
     InstanceVersionChanged(String),
+    VersionQueryChanged(String),
+    VersionSelected(String),
+    ReloadVersionCatalog,
+    VersionCatalogLoaded(GamePlatform, Result<Vec<game::VersionChoice>, String>),
     CreateInstance,
     SelectInstance(String),
     LaunchInstance(String),
@@ -94,6 +98,11 @@ pub struct App {
     data: PersistedState,
     instance_name: String,
     instance_version: String,
+    version_query: String,
+    version_choices: Vec<game::VersionChoice>,
+    version_platform: Option<GamePlatform>,
+    versions_busy: bool,
+    versions_error: Option<String>,
     offline_name: String,
     client_id: String,
     device_code: Option<DeviceCodePrompt>,
@@ -112,7 +121,12 @@ impl Default for App {
             notice: None,
             art: image::Handle::from_bytes(&include_bytes!("../assets/hero.jpg")[..]),
             instance_name: String::new(),
-            instance_version: String::new(),
+            instance_version: "stable".to_owned(),
+            version_query: String::new(),
+            version_choices: Vec::new(),
+            version_platform: None,
+            versions_busy: false,
+            versions_error: None,
             offline_name: String::new(),
             client_id: data.settings.microsoft_client_id.clone(),
             device_code: None,
@@ -128,6 +142,15 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         Message::Navigate(page) => {
             app.page = page;
             app.notice = None;
+            if page == Page::Instances && app.version_platform != Some(app.platform.into()) {
+                let platform = app.platform.into();
+                app.versions_busy = true;
+                app.versions_error = None;
+                return iced::Task::perform(
+                    game::available_versions(platform),
+                    move |result| Message::VersionCatalogLoaded(platform, result),
+                );
+            }
         }
         Message::SelectPlatform(platform) => {
             app.platform = platform;
@@ -135,10 +158,18 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 PlatformChoice::Java => LoaderKind::Vanilla,
                 PlatformChoice::Horizon | PlatformChoice::HorizonOffline => LoaderKind::HorizonContent,
             };
-            if app.instance_version.trim().is_empty() {
-                app.instance_version = "stable".to_owned();
-            }
+            app.instance_version = "stable".to_owned();
+            app.version_query.clear();
+            app.version_choices.clear();
+            app.version_platform = None;
+            app.versions_busy = true;
+            app.versions_error = None;
             app.notice = None;
+            let game_platform = platform.into();
+            return iced::Task::perform(
+                game::available_versions(game_platform),
+                move |result| Message::VersionCatalogLoaded(game_platform, result),
+            );
         }
         Message::SelectLoader(loader) => {
             if loader.is_valid_for(app.platform.into()) {
@@ -152,6 +183,36 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         }
         Message::InstanceNameChanged(value) => app.instance_name = value,
         Message::InstanceVersionChanged(value) => app.instance_version = value,
+        Message::VersionQueryChanged(value) => app.version_query = value,
+        Message::VersionSelected(value) => {
+            app.instance_version = value;
+            app.notice = None;
+        }
+        Message::ReloadVersionCatalog => {
+            let platform = app.platform.into();
+            app.versions_busy = true;
+            app.versions_error = None;
+            return iced::Task::perform(
+                game::available_versions(platform),
+                move |result| Message::VersionCatalogLoaded(platform, result),
+            );
+        }
+        Message::VersionCatalogLoaded(platform, result) => {
+            if platform == app.platform.into() {
+                app.versions_busy = false;
+                app.version_platform = Some(platform);
+                match result {
+                    Ok(choices) => {
+                        app.version_choices = choices;
+                        app.versions_error = None;
+                    }
+                    Err(error) => {
+                        app.version_choices.clear();
+                        app.versions_error = Some(error);
+                    }
+                }
+            }
+        }
         Message::CreateInstance => {
             let name = app.instance_name.trim().to_owned();
             let version = app.instance_version.trim().to_owned();
@@ -1210,6 +1271,87 @@ fn quick_item(
     .into()
 }
 
+fn version_choices_view(app: &App) -> Element<'_, Message> {
+    let query = app.version_query.trim().to_ascii_lowercase();
+    let matches: Vec<_> = app
+        .version_choices
+        .iter()
+        .filter(|choice| {
+            query.is_empty()
+                || choice.id.to_ascii_lowercase().contains(&query)
+                || choice.label.to_ascii_lowercase().contains(&query)
+                || choice.kind.to_ascii_lowercase().contains(&query)
+        })
+        .take(14)
+        .collect();
+
+    let mut choices = column![].spacing(4);
+    for choice in matches {
+        let active = app.instance_version == choice.id;
+        let id = choice.id.clone();
+        let label = choice.label.clone();
+        choices = choices.push(
+            button(text(label).size(9).color(if active { TEXT } else { MUTED }))
+                .on_press(Message::VersionSelected(id))
+                .width(Length::Fill)
+                .padding([6, 9])
+                .style(move |theme, status| {
+                    let mut style = button::secondary(theme, status);
+                    style.background = Some(
+                        if active { PANEL_LIGHT } else { Color::TRANSPARENT }.into()
+                    );
+                    style.text_color = if active { CYAN } else { MUTED };
+                    style.border = Border::default().rounded(7).width(1).color(
+                        if active { EDGE_BRIGHT } else { EDGE }
+                    );
+                    style
+                }),
+        );
+    }
+
+    let content: Element<'_, Message> = if app.versions_busy {
+        container(text("Загружаю каталог версий…").size(9).color(MUTED))
+            .padding(8)
+            .width(Length::Fill)
+            .into()
+    } else if let Some(error) = &app.versions_error {
+        container(
+            column![
+                text(error.clone()).size(9).color(RED),
+                text("Можно ввести ID версии вручную или повторить загрузку списка.")
+                    .size(8)
+                    .color(MUTED),
+            ]
+            .spacing(4),
+        )
+        .padding(8)
+        .width(Length::Fill)
+        .into()
+    } else if app.version_choices.is_empty() {
+        container(text("Каталог пока не загружен. Нажми «Обновить» или введи ID вручную.")
+            .size(9).color(MUTED))
+            .padding(8)
+            .width(Length::Fill)
+            .into()
+    } else if choices.as_column().children().is_empty() {
+        container(text("Ничего не найдено. Попробуй другой запрос или введи ID вручную.")
+            .size(9).color(MUTED))
+            .padding(8)
+            .width(Length::Fill)
+            .into()
+    } else {
+        scrollable(choices)
+            .height(Length::Fixed(132.0))
+            .width(Length::Fill)
+            .into()
+    };
+
+    container(content)
+        .width(Length::Fill)
+        .style(|_| glass_style(PANEL_LIGHT, EDGE))
+        .into()
+}
+
 fn instances_page(app: &App) -> Element<'_, Message> {
     let loaders: &[LoaderKind] = match app.platform {
         PlatformChoice::Java => &[
@@ -1244,15 +1386,44 @@ fn instances_page(app: &App) -> Element<'_, Message> {
                 .on_input(Message::InstanceNameChanged)
                 .padding(10)
                 .size(11),
-            text("Версия игры").size(9).color(MUTED),
-            text_input("Например, 1.21.1 или stable", &app.instance_version)
+            text(match app.platform {
+                PlatformChoice::Java => "Версия Minecraft Java",
+                PlatformChoice::Horizon => "Версия Horizon Runtime",
+                PlatformChoice::HorizonOffline => "Версия Horizon Offline Runtime",
+            }).size(9).color(MUTED),
+            text_input(
+                match app.platform {
+                    PlatformChoice::Java => "ID версии: 1.21.1, b1.7.3, a1.0.16…",
+                    PlatformChoice::Horizon => "ID сборки: stable или nightly-YYYY-MM-DD-commit",
+                    PlatformChoice::HorizonOffline => "ID сборки offline fork-а или stable",
+                },
+                &app.instance_version,
+            )
                 .on_input(Message::InstanceVersionChanged)
                 .padding(10)
                 .size(11),
+            row![
+                text_input(
+                    match app.platform {
+                        PlatformChoice::Java => "Фильтр: release, snapshot, beta, alpha…",
+                        PlatformChoice::Horizon => "Фильтр релизов Horizon…",
+                        PlatformChoice::HorizonOffline => "Фильтр релизов Horizon Offline…",
+                    },
+                    &app.version_query,
+                )
+                    .on_input(Message::VersionQueryChanged)
+                    .padding(9)
+                    .size(10)
+                    .width(Length::Fill),
+                quiet_button("Обновить", Message::ReloadVersionCatalog),
+            ]
+            .spacing(8),
+            version_choices_view(app),
             text("Платформа").size(9).color(MUTED),
             row![
                 choice_button("Minecraft Java", app.platform == PlatformChoice::Java, Message::SelectPlatform(PlatformChoice::Java)),
                 choice_button("Horizon", app.platform == PlatformChoice::Horizon, Message::SelectPlatform(PlatformChoice::Horizon)),
+                choice_button("Horizon Offline", app.platform == PlatformChoice::HorizonOffline, Message::SelectPlatform(PlatformChoice::HorizonOffline)),
             ]
             .spacing(8),
             text("Загрузчик").size(9).color(MUTED),
