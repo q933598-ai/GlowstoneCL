@@ -309,6 +309,7 @@ async fn launch_horizon(
     account: GameAccount,
     flavor: HorizonFlavor,
 ) -> Result<LaunchOutcome, String> {
+    let platform = instance.platform;
     let client = reqwest::Client::builder()
         .user_agent("GlowstoneCL/0.1.0 (https://github.com/q933598-ai/GlowstoneCL)")
         .build()
@@ -425,7 +426,7 @@ async fn launch_horizon(
     launch_horizon_client(&build, &instance_dir, &account).await
         .map(|exit_code| LaunchOutcome {
             instance_id: instance.id.0,
-            platform: GamePlatform::Horizon,
+            platform,
             exit_code,
         })
 }
@@ -849,18 +850,112 @@ async fn is_horizon_prepared(build: &HorizonBuild) -> bool {
         .is_ok_and(|status| status.success())
 }
 
+#[derive(Debug, Clone)]
+struct OfflineMinecraftSource {
+    directory: PathBuf,
+    prism: bool,
+}
+
+/// Find an existing copy of the pinned Minecraft version. Horizon Offline never downloads the
+/// client jar or libraries for an offline account; it imports files from the player's launcher.
+fn find_offline_minecraft_source(version: &str) -> Result<OfflineMinecraftSource, String> {
+    let base = directories::BaseDirs::new()
+        .ok_or_else(|| "Не удалось определить домашний каталог пользователя.".to_owned())?;
+    let home = base.home_dir();
+    let mut candidates: Vec<(PathBuf, bool)> = Vec::new();
+
+    if let Some(path) = std::env::var_os("GLOWSTONE_MINECRAFT_DIR") {
+        let path = PathBuf::from(path);
+        let prism = path.join("instances").is_dir()
+            || path.join("mmc-pack.json").is_file()
+            || path.join("prismlauncher.cfg").is_file();
+        candidates.push((path, prism));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        candidates.extend([
+            (home.join(".minecraft"), false),
+            (base.data_local_dir().join("PrismLauncher"), true),
+            (home.join(".var/app/org.prismlauncher.PrismLauncher/data/PrismLauncher"), true),
+            (base.data_local_dir().join("multimc"), true),
+        ]);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let appdata = PathBuf::from(appdata);
+            candidates.push((appdata.join(".minecraft"), false));
+            candidates.push((appdata.join("PrismLauncher"), true));
+            candidates.push((appdata.join("MultiMC"), true));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let support = home.join("Library/Application Support");
+        candidates.push((support.join("minecraft"), false));
+        candidates.push((support.join("PrismLauncher"), true));
+        candidates.push((support.join("MultiMC"), true));
+    }
+
+    for (directory, prism) in candidates {
+        if !directory.is_dir() {
+            continue;
+        }
+        if prism {
+            // Prism/MultiMC share assets and libraries in the launcher root. The preparer
+            // resolves the instance whose mmc-pack.json selects the pinned Minecraft version.
+            if directory.join("assets").is_dir()
+                && directory.join("libraries").is_dir()
+                && (directory.join("instances").is_dir()
+                    || directory.join("mmc-pack.json").is_file()
+                    || directory.join("meta/net.minecraft").is_dir())
+            {
+                return Ok(OfflineMinecraftSource { directory, prism: true });
+            }
+        } else {
+            let version_dir = directory.join("versions").join(version);
+            if version_dir.join(format!("{}.jar", version)).is_file()
+                && version_dir.join(format!("{}.json", version)).is_file()
+                && directory.join("assets").is_dir()
+                && directory.join("libraries").is_dir()
+            {
+                return Ok(OfflineMinecraftSource { directory, prism: false });
+            }
+        }
+    }
+
+    Err(format!(
+        "Horizon Offline не нашёл локальные файлы Minecraft {}. Установи и запусти эту версию в официальном лаунчере или Prism Launcher. GlowstoneCL не скачивает клиент Minecraft для offline-профиля. Можно указать путь через GLOWSTONE_MINECRAFT_DIR.",
+        version
+    ))
+}
+
 async fn prepare_horizon(
     build: &HorizonBuild,
-    minecraft_dir: &Path,
-    server_jar: &Path,
-    java_home: &Path,
+    minecraft_dir: Option<&Path>,
+    prism_dir: Option<&Path>,
+    server_jar: Option<&Path>,
+    java_home: Option<&Path>,
 ) -> Result<(), String> {
     let api = query_launch_api(&build.preparer(), &build.directory).await?;
     let options = advertised_options(&api)?;
-    for required in ["--prepare", "--output", "--server-jar", "--minecraft-dir"] {
+    for required in ["--prepare", "--output"] {
         if !options.contains(required) {
             return Err(format!("Этот Horizon preparer не поддерживает обязательную опцию {required}."));
         }
+    }
+    if minecraft_dir.is_none() && prism_dir.is_none() {
+        return Err("Не указан источник локальных файлов Minecraft для подготовки Horizon.".to_owned());
+    }
+    if minecraft_dir.is_some() && !options.contains("--minecraft-dir") {
+        return Err("Этот Horizon preparer не поддерживает --minecraft-dir.".to_owned());
+    }
+    if prism_dir.is_some() && !options.contains("--prism-dir") {
+        return Err("Этот Horizon preparer не поддерживает --prism-dir. Обнови offline runtime.".to_owned());
+    }
+    if server_jar.is_some() && !options.contains("--server-jar") {
+        return Err("Этот Horizon preparer не поддерживает --server-jar.".to_owned());
     }
 
     let mut command = TokioCommand::new(build.preparer());
@@ -869,19 +964,27 @@ async fn prepare_horizon(
         .arg("--prepare")
         .arg("--output")
         .arg(build.prepared())
-        .arg("--server-jar")
-        .arg(server_jar)
-        .arg("--minecraft-dir")
-        .arg(minecraft_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    if let Some(minecraft_dir) = minecraft_dir {
+        command.arg("--minecraft-dir").arg(minecraft_dir);
+    }
+    if let Some(prism_dir) = prism_dir {
+        command.arg("--prism-dir").arg(prism_dir);
+    }
+    if let Some(server_jar) = server_jar {
+        command.arg("--server-jar").arg(server_jar);
+    }
+
     if options.contains("--complete") {
         command.arg("--complete");
     }
-    if options.contains("--java-home") {
-        command.arg("--java-home").arg(java_home);
+    if let Some(java_home) = java_home {
+        if options.contains("--java-home") {
+            command.arg("--java-home").arg(java_home);
+        }
     }
     if options.contains("--progress") {
         command.args(["--progress", "json"]);
@@ -985,9 +1088,9 @@ async fn launch_horizon_client(
     if !options.contains("--resources") {
         return Err("Эта сборка Horizon не поддерживает --resources.".to_owned());
     }
-    if !options.contains("--session-stdin") {
+    if build.flavor == HorizonFlavor::Official && !options.contains("--session-stdin") {
         return Err(
-            "Эта сборка Horizon не поддерживает безопасную передачу Microsoft-сессии через stdin."
+            "Официальная сборка Horizon не поддерживает безопасную передачу Microsoft-сессии через stdin."
                 .to_owned(),
         );
     }
@@ -1004,28 +1107,32 @@ async fn launch_horizon_client(
         args.push("--home".to_owned());
         args.push(game_dir.display().to_string());
     }
-    args.push("--session-stdin".to_owned());
 
-    let xuid = account.xuid();
-    let session = HorizonSession {
-        name: &account.name,
-        uuid: account.uuid.replace('-', ""),
-        access_token: &account.access_token,
-        user_type: "msa",
-        xuid,
+    let session_json = if build.flavor == HorizonFlavor::Official {
+        args.push("--session-stdin".to_owned());
+        let xuid = account.xuid();
+        let session = HorizonSession {
+            name: &account.name,
+            uuid: account.uuid.replace('-', ""),
+            access_token: &account.access_token,
+            user_type: "msa",
+            xuid,
+        };
+        Some(serde_json::to_vec(&session)
+            .map_err(|error| format!("Не удалось сериализовать игровую сессию: {error}"))?)
+    } else {
+        None
     };
-    let session_json = serde_json::to_vec(&session)
-        .map_err(|error| format!("Не удалось сериализовать игровую сессию: {error}"))?;
 
     let mut child = TokioCommand::new(build.client())
         .args(&args)
         .current_dir(game_dir)
-        .stdin(Stdio::piped())
+        .stdin(if session_json.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
         .map_err(|error| format!("Не удалось запустить horizon-client: {error}"))?;
-    {
+    if let Some(session_json) = session_json {
         let mut stdin = child
             .stdin
             .take()
