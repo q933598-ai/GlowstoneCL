@@ -326,13 +326,33 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             );
         }
         Message::DeviceCodeReady(result) => {
-            app.auth_busy = false;
             match result {
                 Ok(prompt) => {
-                    app.notice = Some("Код готов. Открой страницу Microsoft, подтверди вход и затем проверь авторизацию.".into());
-                    app.device_code = Some(prompt);
+                    // Mirror Prism Launcher's Device Code fallback: open the Microsoft
+                    // verification page and poll in the background without another click.
+                    let open_result = webbrowser::open(&prompt.verification_uri);
+                    let client_id = app.client_id.trim().to_owned();
+                    let device_code = prompt.device_code.clone();
+                    let interval = prompt.interval;
+                    let expires_in = prompt.expires_in;
+                    app.device_code = Some(prompt.clone());
+                    app.auth_busy = true;
+                    app.notice = Some(match open_result {
+                        Ok(()) => "Браузер открыт. Войди в Microsoft — GlowstoneCL сам заметит успешную авторизацию.".to_owned(),
+                        Err(error) => format!(
+                            "Не удалось автоматически открыть браузер: {error}. Открой {} и введи код {}. Проверка уже запущена.",
+                            prompt.verification_uri, prompt.user_code
+                        ),
+                    });
+                    return iced::Task::perform(
+                        auth::poll_device_code(client_id, device_code, interval, expires_in),
+                        Message::MicrosoftPollFinished,
+                    );
                 }
-                Err(error) => app.notice = Some(error),
+                Err(error) => {
+                    app.auth_busy = false;
+                    app.notice = Some(error);
+                }
             }
         }
         Message::OpenMicrosoftVerification => {
@@ -1412,7 +1432,7 @@ fn accounts_page(app: &App) -> Element<'_, Message> {
             ]
             .spacing(8)
             .align_y(Alignment::Center),
-            text("GlowstoneCL использует Device Code Flow. Нужен Client ID зарегистрированного public-client приложения Microsoft.")
+            text("Нажми вход — GlowstoneCL откроет страницу Microsoft в браузере и автоматически дождётся подтверждения. Если браузер не открылся, код можно ввести вручную.")
                 .size(9)
                 .color(MUTED),
             text("Microsoft Client ID").size(9).color(MUTED),
@@ -1504,11 +1524,12 @@ fn microsoft_device_code(app: &App) -> Element<'_, Message> {
             text(&prompt.message).size(9).color(MUTED),
             text(&prompt.user_code).size(26).color(CYAN),
             row![
-                quiet_button("Открыть страницу Microsoft", Message::OpenMicrosoftVerification),
-                primary_button(
-                    if app.auth_busy { "Проверяю..." } else { "Я подтвердил вход" },
-                    Message::PollMicrosoftLogin,
-                ),
+                quiet_button("Открыть страницу Microsoft ещё раз", Message::OpenMicrosoftVerification),
+                if app.auth_busy {
+                    status_chip("ОЖИДАНИЕ ПОДТВЕРЖДЕНИЯ", PANEL_LIGHT, CYAN)
+                } else {
+                    quiet_button("Повторить проверку", Message::PollMicrosoftLogin)
+                },
             ]
             .spacing(8),
             text(&prompt.verification_uri).size(9).color(CYAN),
