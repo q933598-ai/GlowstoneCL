@@ -1844,109 +1844,312 @@ fn pack_card(
 }
 
 fn right_rail(app: &App) -> Element<'_, Message> {
-    let news = container(
-        column![
-            row![
-                text("Новости").size(14).color(TEXT),
-                Space::new().width(Length::Fill),
-                button(text("Все").size(9).color(CYAN))
-                    .on_press(Message::Info("Новостные ленты появятся после подключения источников."))
-                    .style(button::text),
+    let entries = news_entries();
+    let mut news_content = column![
+        row![
+            text("Новости GlowstoneCL").size(13).color(TEXT),
+            Space::new().width(Length::Fill),
+            button(text("Все").size(9).color(CYAN))
+                .on_press(Message::Navigate(Page::News))
+                .style(button::text),
+        ]
+        .align_y(Alignment::Center),
+        rule::horizontal(1).style(|_| rule::Style {
+            color: DIVIDER,
+            radius: iced::border::Radius::default(),
+            fill_mode: rule::FillMode::Full,
+            snap: true,
+        }),
+    ]
+    .spacing(10);
+    for (index, entry) in entries.iter().take(3).enumerate() {
+        news_content = news_content.push(news_item(index, entry));
+    }
+    let news = container(news_content)
+        .padding(13)
+        .width(Length::Fill)
+        .style(|_| glass_style(PANEL, EDGE));
+
+    let mut recent_content = column![
+        row![
+            text("Recent Play").size(13).color(TEXT),
+            Space::new().width(Length::Fill),
+            button(text("Все сборки").size(8).color(CYAN))
+                .on_press(Message::Navigate(Page::Instances))
+                .style(button::text),
+        ]
+        .align_y(Alignment::Center),
+    ]
+    .spacing(10);
+    let mut recent_count = 0usize;
+    for recent in app.recent_plays.iter().take(5) {
+        if let Some(instance) = app.data.instances.iter()
+            .find(|instance| instance.id.0 == recent.instance_id)
+        {
+            recent_content = recent_content.push(recent_play_item(instance.clone(), recent.clone()));
+            recent_count += 1;
+        }
+    }
+    if recent_count == 0 {
+        let selected = app.data.settings.selected_instance_id.as_ref()
+            .and_then(|id| app.data.instances.iter().find(|instance| &instance.id.0 == id));
+        recent_content = recent_content.push(
+            column![
+                text("История пока пуста").size(10).color(TEXT),
+                text("После первого запуска сборка появится здесь.").size(8).color(MUTED),
+                if let Some(instance) = selected {
+                    quiet_button("Запустить выбранную сборку", Message::LaunchInstance(instance.id.0.clone()))
+                } else {
+                    quiet_button("Выбрать сборку", Message::Navigate(Page::Instances))
+                },
             ]
-            .align_y(Alignment::Center),
-            rule::horizontal(1).style(|_| rule::Style {
-                color: DIVIDER,
-                radius: iced::border::Radius::default(),
-                fill_mode: rule::FillMode::Full,
-                snap: true,
-            }),
-            news_item("minecraft", "Minecraft Java", "Новости и релизы игры", CYAN),
-            news_item("curseforge", "Forge и NeoForge", "Обновления загрузчиков", ORANGE),
-            news_item("horizon", "Horizon", "Новости Rust runtime", PURPLE),
-        ]
-        .spacing(13),
-    )
-    .padding(15)
-    .width(Length::Fill)
-    .style(|_| glass_style(PANEL, EDGE));
+            .spacing(7),
+        );
+    }
+    let recent = container(recent_content)
+        .padding(13)
+        .width(Length::Fill)
+        .style(|_| glass_style(PANEL, EDGE));
 
-    let last_instance = app.data.settings.selected_instance_id.as_ref()
-        .and_then(|id| app.data.instances.iter().find(|item| &item.id.0 == id))
-        .or_else(|| app.data.instances.last())
-        .map(|item| item.name.clone())
-        .unwrap_or_else(|| "Пока нет сборок".into());
-    let last_account = app.data.settings.selected_account_id.as_ref()
-        .and_then(|id| app.data.accounts.iter().find(|item| &item.id == id))
-        .map(|item| item.name.clone())
-        .unwrap_or_else(|| "Не авторизован".into());
-
-    let quick = container(
-        column![
-            text("Быстрый запуск").size(14).color(TEXT),
-            quick_item("instances", "Последняя сборка", last_instance, Page::Instances),
-            quick_item("user", "Последний профиль", last_account, Page::Accounts),
-        ]
-        .spacing(13),
-    )
-    .padding(15)
-    .width(Length::Fill)
-    .style(|_| glass_style(PANEL, EDGE));
-
+    let status_label = if app.launch_busy.is_some() {
+        "Подготовка игрового процесса"
+    } else {
+        "Готов к запуску"
+    };
     let status = container(
         row![
             container(icon("check", GREEN, 16.0))
-                .width(36)
-                .height(36)
+                .width(34)
+                .height(34)
                 .align_x(Alignment::Center)
                 .align_y(Alignment::Center)
                 .style(|_| glass_style(Color::from_rgba(0.04, 0.24, 0.12, 0.72), EDGE)),
             column![
-                text("Лаунчер готов").size(10).color(TEXT),
-                text(format!("{} сборок · {} аккаунтов", app.data.instances.len(), app.data.accounts.len()))
-                    .size(8)
-                    .color(MUTED),
+                text(status_label).size(10).color(TEXT),
+                text(format!("GlowstoneCL v{} · {} сборок · {} аккаунтов",
+                    env!("CARGO_PKG_VERSION"), app.data.instances.len(), app.data.accounts.len()))
+                    .size(8).color(MUTED),
             ]
             .spacing(3),
         ]
         .spacing(9)
         .align_y(Alignment::Center),
     )
-    .padding(14)
+    .padding(12)
     .width(Length::Fill)
     .style(|_| glass_style(PANEL, EDGE));
 
-    column![news, quick, status]
-        .spacing(13)
+    column![news, recent, status]
+        .spacing(12)
         .width(Length::Fill)
         .into()
 }
 
-fn news_item(
-    icon_name: &'static str,
+#[derive(Debug, Clone, Copy)]
+struct NewsEntry {
+    icon: &'static str,
     title: &'static str,
-    description: &'static str,
+    summary: &'static str,
+    body: &'static str,
+    date: &'static str,
     accent: Color,
-) -> Element<'static, Message> {
+}
+
+fn news_entries() -> [NewsEntry; 4] {
+    [
+        NewsEntry {
+            icon: "diamond",
+            title: "GlowstoneCL — новый этап",
+            summary: "Единая библиотека Minecraft Java и Horizon.",
+            body: "GlowstoneCL объединяет профили Minecraft Java, официальный Horizon и отдельный Horizon Offline. У каждой сборки собственная рабочая папка, а выбор аккаунта и управление профилями доступны из одного приложения.",
+            date: "21 ноября 2026",
+            accent: CYAN,
+        },
+        NewsEntry {
+            icon: "image",
+            title: "Обновление интерфейса",
+            summary: "Стеклянные панели, быстрый запуск и избранное.",
+            body: "Главная страница получила более компактную навигацию, центральную панель запуска и правую колонку с новостями и Recent Play. Карточки используют реальные сборки из локальной библиотеки. Избранные профили сохраняются между запусками лаунчера.",
+            date: "21 ноября 2026",
+            accent: PURPLE,
+        },
+        NewsEntry {
+            icon: "puzzle",
+            title: "Каталог модов",
+            summary: "Отдельные источники для Java и Horizon.",
+            body: "Для Java доступен каталог Modrinth с фильтрами по версии Minecraft и загрузчику. Для Horizon используется отдельный Horizon Registry и формат HMOD. GlowstoneCL проверяет контрольные суммы и управляет только теми файлами, которые установил сам.",
+            date: "21 ноября 2026",
+            accent: GREEN,
+        },
+        NewsEntry {
+            icon: "shield",
+            title: "Безопасность и сохранность данных",
+            summary: "Учётные данные и история запусков.",
+            body: "Microsoft refresh token хранится через системное хранилище учётных данных. Недавние запуски записываются отдельно от основного файла настроек, чтобы обновление истории не затрагивало аккаунты и параметры пользователя.",
+            date: "21 ноября 2026",
+            accent: ORANGE,
+        },
+    ]
+}
+
+fn news_item(index: usize, entry: &NewsEntry) -> Element<'static, Message> {
+    button(
+        row![
+            container(icon(entry.icon, entry.accent, 17.0))
+                .width(36)
+                .height(36)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center)
+                .style(move |_| glass_style(
+                    Color::from_rgba(entry.accent.r, entry.accent.g, entry.accent.b, 0.14),
+                    EDGE,
+                )),
+            column![
+                text(entry.title).size(9).color(TEXT),
+                text(entry.summary).size(8).color(MUTED),
+                text(entry.date).size(7).color(SUBTLE),
+            ]
+            .spacing(3),
+        ]
+        .spacing(9)
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::OpenNews(index))
+    .width(Length::Fill)
+    .padding(3)
+    .style(|theme, _| {
+        let mut style = button::text(theme, button::Status::Active);
+        style.background = Some(Color::TRANSPARENT.into());
+        style.text_color = TEXT;
+        style
+    })
+    .into()
+}
+
+fn recent_play_item(instance: GameInstance, recent: store::RecentPlay) -> Element<'static, Message> {
+    let id = instance.id.0.clone();
     row![
-        container(icon(icon_name, accent, 18.0))
-            .width(38)
-            .height(38)
+        container(icon("play", CYAN, 13.0))
+            .width(30)
+            .height(30)
             .align_x(Alignment::Center)
             .align_y(Alignment::Center)
-            .style(move |_| glass_style(
-                Color::from_rgba(accent.r, accent.g, accent.b, 0.14),
-                EDGE,
-            )),
+            .style(|_| glass_style(CYAN_DARK, EDGE)),
         column![
-            text(title).size(10).color(TEXT),
-            text(description).size(9).color(MUTED),
-            text("Источник будет подключён").size(8).color(SUBTLE),
+            text(instance.name).size(9).color(TEXT),
+            text(format!("{} · {}", instance.game_version, loader_label(instance.loader)))
+                .size(8).color(MUTED),
+            text(relative_play_time(recent.launched_at)).size(7).color(SUBTLE),
         ]
-        .spacing(4),
+        .spacing(3),
+        Space::new().width(Length::Fill),
+        button(icon("play", CYAN, 12.0))
+            .on_press(Message::LaunchInstance(id))
+            .padding(7)
+            .style(button::text),
     ]
-    .spacing(10)
-    .align_y(Alignment::Start)
+    .spacing(8)
+    .align_y(Alignment::Center)
     .into()
+}
+
+fn relative_play_time(timestamp: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let elapsed = now.saturating_sub(timestamp);
+    if elapsed < 60 {
+        "Только что".to_owned()
+    } else if elapsed < 3_600 {
+        format!("{} мин. назад", elapsed / 60)
+    } else if elapsed < 86_400 {
+        format!("{} ч. назад", elapsed / 3_600)
+    } else if elapsed < 604_800 {
+        format!("{} дн. назад", elapsed / 86_400)
+    } else {
+        format!("{} дн. назад", elapsed / 86_400)
+    }
+}
+
+fn news_page(app: &App) -> Element<'_, Message> {
+    let entries = news_entries();
+    if let Some(index) = app.selected_news.filter(|index| *index < entries.len()) {
+        let entry = entries[index];
+        return column![
+            row![
+                quiet_button("← Все новости", Message::Navigate(Page::News)),
+                Space::new().width(Length::Fill),
+                status_chip(entry.date, PANEL_LIGHT, MUTED),
+            ]
+            .align_y(Alignment::Center),
+            container(
+                column![
+                    icon(entry.icon, entry.accent, 28.0),
+                    text(entry.title).size(22).color(TEXT),
+                    text(entry.summary).size(11).color(MUTED),
+                    rule::horizontal(1).style(|_| rule::Style {
+                        color: DIVIDER,
+                        radius: iced::border::Radius::default(),
+                        fill_mode: rule::FillMode::Full,
+                        snap: true,
+                    }),
+                    text(entry.body).size(11).color(TEXT),
+                ]
+                .spacing(14),
+            )
+            .padding(22)
+            .width(Length::Fill)
+            .style(|_| glass_style(PANEL, EDGE_BRIGHT)),
+        ]
+        .spacing(14)
+        .width(Length::Fill)
+        .into();
+    }
+
+    let mut list = column![
+        section_header("НОВОСТИ GLOWSTONECL", "Изменения и возможности, доступные в текущей версии.")
+    ]
+    .spacing(12)
+    .width(Length::Fill);
+    for (index, entry) in entries.iter().enumerate() {
+        list = list.push(
+            button(
+                row![
+                    container(icon(entry.icon, entry.accent, 22.0))
+                        .width(48)
+                        .height(48)
+                        .align_x(Alignment::Center)
+                        .align_y(Alignment::Center)
+                        .style(move |_| glass_style(
+                            Color::from_rgba(entry.accent.r, entry.accent.g, entry.accent.b, 0.14),
+                            EDGE,
+                        )),
+                    column![
+                        text(entry.title).size(13).color(TEXT),
+                        text(entry.summary).size(9).color(MUTED),
+                        text(entry.date).size(8).color(SUBTLE),
+                    ]
+                    .spacing(5),
+                    Space::new().width(Length::Fill),
+                    icon("chevron-right", CYAN, 15.0),
+                ]
+                .align_y(Alignment::Center)
+                .spacing(12),
+            )
+            .on_press(Message::OpenNews(index))
+            .width(Length::Fill)
+            .padding(14)
+            .style(|theme, status| {
+                let mut style = button::secondary(theme, status);
+                style.background = Some(PANEL.into());
+                style.text_color = TEXT;
+                style.border = Border::default().rounded(14).width(1).color(EDGE);
+                style
+            }),
+        );
+    }
+    list.into()
 }
 
 fn quick_item(
