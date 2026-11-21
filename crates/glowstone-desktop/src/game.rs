@@ -389,7 +389,7 @@ async fn ensure_horizon_build(
         return Err("GitHub вернул некорректное имя версии Horizon.".to_owned());
     }
 
-    let archive_path = versions_dir.join(format!(".{version}.archive"));
+    let archive_path = horizon_archive_cache_path(versions_dir, &version, asset_name)?;
     tokio::fs::write(&archive_path, &archive)
         .await
         .map_err(|error| format!("Не удалось сохранить архив Horizon: {error}"))?;
@@ -541,6 +541,21 @@ fn expected_sha256(sums: &[u8], asset_name: &str) -> Result<String, String> {
         }
     }
     Err(format!("SHA256SUMS не содержит контрольную сумму {asset_name}."))
+}
+
+fn horizon_archive_cache_path(
+    versions_dir: &Path,
+    version: &str,
+    asset_name: &str,
+) -> Result<PathBuf, String> {
+    let suffix = if asset_name.ends_with(".tar.gz") {
+        ".tar.gz"
+    } else if asset_name.ends_with(".zip") {
+        ".zip"
+    } else {
+        return Err(format!("Неизвестный формат архива Horizon: {asset_name}"));
+    };
+    Ok(versions_dir.join(format!(".{version}{suffix}")))
 }
 
 fn unpack_horizon_archive(archive_path: &Path, destination: &Path) -> Result<(), String> {
@@ -872,4 +887,51 @@ async fn launch_horizon_client(
         .await
         .map_err(|error| format!("Ошибка ожидания Horizon: {error}"))?;
     Ok(status.code())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_the_github_release_name_as_the_nightly_title() {
+        let release: GithubRelease = serde_json::from_str(
+            r#"{
+                "name": "Nightly 2026-11-21 · 8f83e5c",
+                "tag_name": "nightly",
+                "assets": []
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            nightly_version(&release).unwrap(),
+            "nightly-2026-11-21-8f83e5c"
+        );
+    }
+
+    #[test]
+    fn nightly_identity_rejects_untrusted_title_parts() {
+        let release: GithubRelease = serde_json::from_str(
+            r#"{"name":"Nightly 2026-11-21 · ../../x","tag_name":"nightly","assets":[]}"#,
+        )
+        .unwrap();
+
+        assert!(nightly_version(&release).is_err());
+    }
+
+    #[test]
+    fn horizon_archive_cache_path_keeps_the_archive_format() {
+        let root = Path::new("/tmp/glowstone-horizon");
+
+        assert_eq!(
+            horizon_archive_cache_path(root, "nightly-2026-11-21-8f83e5c", "horizon-linux-x86_64.tar.gz").unwrap(),
+            root.join(".nightly-2026-11-21-8f83e5c.tar.gz")
+        );
+        assert_eq!(
+            horizon_archive_cache_path(root, "nightly-2026-11-21-8f83e5c", "horizon-windows-x64.zip").unwrap(),
+            root.join(".nightly-2026-11-21-8f83e5c.zip")
+        );
+        assert!(horizon_archive_cache_path(root, "x", "unknown.bin").is_err());
+    }
 }
