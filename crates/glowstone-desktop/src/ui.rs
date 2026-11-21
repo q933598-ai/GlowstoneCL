@@ -3011,7 +3011,7 @@ fn horizon_catalog_page(app: &App) -> Element<'_, Message> {
                 ].spacing(8),
                 targets,
                 text(format!("Целевая сборка: {current_profile}")).size(9).color(MUTED),
-                text("Устанавливаются только .hmod content-моды с SHA-256 из реестра. Нативные .hnmod пока не поддерживаются.")
+                text("Устанавливаются проверенные content .hmod с SHA-256. Нативные пакеты требуют отдельной сборки и пока не поддерживаются.")
                     .size(8).color(SUBTLE),
             ].spacing(9)
         )
