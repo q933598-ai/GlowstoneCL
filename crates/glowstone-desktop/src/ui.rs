@@ -1375,6 +1375,7 @@ fn account_avatar(account: Option<&AccountProfile>) -> Element<'static, Message>
     if let Some(account) = account {
         if let Ok(Some((path, _))) = store::active_skin_file(&account.uuid) {
             return image::Image::new(image::Handle::from_path(path))
+                .crop(Rectangle::<u32> { x: 8, y: 8, width: 8, height: 8 })
                 .width(Length::Fixed(38.0))
                 .height(Length::Fixed(38.0))
                 .content_fit(ContentFit::Cover)
@@ -1537,7 +1538,7 @@ fn main_content(app: &App) -> Element<'_, Message> {
         Page::Settings => settings_page(app),
         Page::Catalog => catalog_page(app),
         Page::Modpacks => modpacks_page(),
-        Page::Downloads => downloads_page(),
+        Page::Downloads => downloads_page(app),
         Page::News => news_page(app),
     }
 }
@@ -1574,7 +1575,7 @@ fn home_page(app: &App) -> Element<'_, Message> {
         let mod_count = store::installed_mod_count(&instance.id.0, instance.platform);
         build_cards = build_cards.push(pack_card(
             app.art.clone(),
-            (*instance).clone(),
+            (**instance).clone(),
             index,
             favorite,
             mod_count,
@@ -3602,20 +3603,66 @@ fn modpacks_page() -> Element<'static, Message> {
     .into()
 }
 
-fn downloads_page() -> Element<'static, Message> {
-    column![
-        section_header("ОЧЕРЕДЬ ЗАДАЧ", "Загрузка игры, библиотек, модов и обновлений."),
+fn downloads_page(app: &App) -> Element<'_, Message> {
+    let active_operation = if let Some(id) = app.launch_busy.as_deref() {
+        app.data.instances.iter()
+            .find(|instance| instance.id.0 == id)
+            .map(|instance| format!("Подготавливается запуск: {} · {}", instance.name, instance.game_version))
+    } else if app.mods_busy {
+        Some(if let Some(project) = app.mods_busy_project.as_deref() {
+            format!("Идёт установка мода: {project}")
+        } else {
+            "Идёт поиск совместимых модов в выбранном каталоге.".to_owned()
+        })
+    } else {
+        None
+    };
+
+    let activity: Element<'_, Message> = if let Some(operation) = active_operation {
+        container(
+            row![
+                icon("loader", CYAN, 22.0),
+                column![
+                    text("Операция выполняется").size(12).color(TEXT),
+                    text(operation).size(9).color(MUTED),
+                ]
+                .spacing(4),
+            ]
+            .spacing(11)
+            .align_y(Alignment::Center),
+        )
+        .padding(15)
+        .width(Length::Fill)
+        .style(|_| glass_style(CYAN_DARK, EDGE_BRIGHT))
+        .into()
+    } else {
         container(
             column![
-                icon("download", CYAN, 26.0),
-                text("Нет активных загрузок").size(15).color(TEXT),
-                text("Когда будет подключён установщик, здесь появятся прогресс, скорость и проверка целостности.")
-                    .size(10)
-                    .color(MUTED),
+                icon("check-circle", GREEN, 24.0),
+                text("Нет активных операций").size(13).color(TEXT),
+                text("Установка игры, библиотек и модов запускается по запросу из соответствующих разделов.")
+                    .size(9).color(MUTED),
             ]
-            .spacing(9),
+            .spacing(8),
         )
-        .padding(20)
+        .padding(18)
+        .width(Length::Fill)
+        .style(|_| glass_style(PANEL, EDGE))
+        .into()
+    };
+
+    column![
+        section_header("ЗАГРУЗКИ", "Состояние операций установщика и запуска."),
+        activity,
+        container(
+            column![
+                text("О загрузках").size(12).color(TEXT),
+                text("Java- и Horizon-установщики скачивают необходимые компоненты по запросу и выполняют проверку файлов. Полная очередь с процентом, скоростью, журналом и отменой загрузок пока не подключена — здесь не отображаются вымышленные задачи или прогресс.")
+                    .size(9).color(MUTED),
+            ]
+            .spacing(7),
+        )
+        .padding(15)
         .width(Length::Fill)
         .style(|_| glass_style(PANEL, EDGE)),
     ]
