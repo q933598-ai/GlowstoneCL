@@ -357,3 +357,40 @@ pub fn remove(instance_id: &str, mod_id: u32, file_id: u32) -> Result<Vec<Instal
     save_manifest(instance_id, &manifest)?;
     installed(instance_id)
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_accepts_plain_jar_file_names() {
+        assert_eq!(valid_jar_name("some-mod.jar"), Some("some-mod.jar"));
+        assert!(valid_jar_name("../outside.jar").is_none());
+        assert!(valid_jar_name("nested/mod.jar").is_none());
+        assert!(valid_jar_name("nested\\mod.jar").is_none());
+        assert!(valid_jar_name("not-a-jar.zip").is_none());
+    }
+
+    #[test]
+    fn sha1_digest_uses_lowercase_hex() {
+        assert_eq!(digest(b"abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");
+    }
+
+    #[test]
+    fn curseforge_loader_mapping_is_platform_specific() {
+        let mut instance = GameInstance {
+            id: glowstone_core::InstanceId("123e4567-e89b-12d3-a456-426614174000".to_owned()),
+            name: "Test".to_owned(),
+            platform: GamePlatform::Java,
+            game_version: "1.20.1".to_owned(),
+            loader: LoaderKind::Fabric,
+            loader_version: None,
+            state: glowstone_core::InstanceState::NotInstalled,
+        };
+        assert_eq!(loader_type(&instance).unwrap(), 4);
+        instance.platform = GamePlatform::Horizon;
+        instance.loader = LoaderKind::HorizonContent;
+        assert!(loader_type(&instance).is_err());
+    }
+}
