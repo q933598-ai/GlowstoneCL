@@ -46,7 +46,6 @@ struct ProjectVersion {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[derive(Debug, Clone, Deserialize)]
 struct VersionFile {
     filename: String,
     url: String,
