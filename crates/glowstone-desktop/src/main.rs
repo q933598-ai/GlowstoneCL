@@ -12,6 +12,7 @@ fn main() -> iced::Result {
     apply_linux_backend_override();
 
     iced::application(ui::App::default, ui::update, ui::view)
+        .subscription(ui::subscription)
         .title("GlowstoneCL")
         .theme(iced::Theme::Dark)
         .default_font(default_font())
