@@ -310,20 +310,25 @@ async fn authenticate_minecraft(microsoft_access_token: &str) -> Result<AccountP
         ));
     }
 
-    let owns_java_edition = entitlement_body["items"]
+    let can_play_java = entitlement_body["items"]
         .as_array()
         .is_some_and(|items| {
             items.iter().any(|item| {
                 matches!(
                     item["name"].as_str(),
-                    Some("game_minecraft" | "product_minecraft")
+                    Some(
+                        "game_minecraft"
+                            | "product_minecraft"
+                            | "product_game_pass_pc"
+                            | "product_game_pass_ultimate"
+                    )
                 )
             })
         });
 
-    if !owns_java_edition {
+    if !can_play_java {
         return Err(
-            "Microsoft-аккаунт вошёл успешно, но Minecraft Java Edition не найдена среди лицензий."
+            "Microsoft-аккаунт вошёл успешно, но у него не найдена лицензия Minecraft Java Edition или активная подписка PC Game Pass / Game Pass Ultimate."
                 .to_owned(),
         );
     }
