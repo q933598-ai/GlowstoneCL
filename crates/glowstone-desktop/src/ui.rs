@@ -40,6 +40,7 @@ pub enum Page {
     Accounts,
     Wardrobe,
     Settings,
+    News,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,6 +121,8 @@ pub enum Message {
     OpenMicrosoftVerification,
     PollMicrosoftLogin,
     MicrosoftPollFinished(Result<PollResult, String>),
+    ToggleFavorite(String),
+    OpenNews(usize),
     Info(&'static str),
 }
 
@@ -161,6 +164,8 @@ pub struct App {
     skin_model: store::SkinModel,
     wardrobe_preview: Option<std::sync::Arc<Vec<[u8; 4]>>>,
     wardrobe_angle: f32,
+    recent_plays: Vec<store::RecentPlay>,
+    selected_news: Option<usize>,
 }
 
 impl Default for App {
@@ -212,6 +217,8 @@ impl Default for App {
             skin_model: store::SkinModel::Classic,
             wardrobe_preview: None,
             wardrobe_angle: 0.0,
+            recent_plays: store::load_recent_plays(),
+            selected_news: None,
             data,
         }
     }
@@ -625,6 +632,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             }
             match result {
                 Ok(outcome) => {
+                    app.recent_plays = store::load_recent_plays();
                     if let Some(instance) = app.data.instances.iter_mut().find(|item| item.id.0 == outcome.instance_id) {
                         instance.state = InstanceState::Ready;
                     }
@@ -1120,6 +1128,25 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 Err(error) => app.notice = Some(error),
             }
         }
+        Message::ToggleFavorite(id) => {
+            if app.data.favorite_instance_ids.iter().any(|favorite| favorite == &id) {
+                app.data.favorite_instance_ids.retain(|favorite| favorite != &id);
+                app.notice = Some("Сборка удалена из избранного.".to_owned());
+            } else if app.data.instances.iter().any(|instance| instance.id.0 == id) {
+                app.data.favorite_instance_ids.push(id);
+                app.notice = Some("Сборка добавлена в избранное.".to_owned());
+            }
+            if let Err(error) = store::save(&app.data) {
+                app.notice = Some(format!("Не удалось сохранить избранное: {error}"));
+            }
+        }
+        Message::OpenNews(index) => {
+            if index < news_entries().len() {
+                app.selected_news = Some(index);
+                app.page = Page::News;
+                app.notice = None;
+            }
+        }
         Message::Info(message) => app.notice = Some(message.to_owned()),
     }
 
@@ -1137,7 +1164,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                     .width(Length::Fill),
                 scrollable(right_rail(app))
                     .height(Length::Fill)
-                    .width(Length::Fixed(278.0)),
+                    .width(Length::Fixed(258.0)),
             ]
             .spacing(14)
             .height(Length::Fill)
@@ -1205,8 +1232,8 @@ impl<Message> canvas::Program<Message> for GlowBackdrop {
 }
 
 fn draw_glow(frame: &mut canvas::Frame, center: iced::Point, radius: f32, color: Color) {
-    for layer in 0..24 {
-        let amount = layer as f32 / 23.0;
+    for layer in 0..12 {
+        let amount = layer as f32 / 11.0;
         let current_radius = radius * (1.0 - amount * 0.94);
         let alpha = 0.001 + (1.0 - amount).powf(2.0) * 0.008;
         let circle = canvas::Path::circle(center, current_radius);
@@ -1245,7 +1272,7 @@ fn sidebar(app: &App) -> Element<'_, Message> {
 
     let discover = column![
         section_label("ОТКРЫТЬ"),
-        nav_button("puzzle", "Каталог модов", Page::Catalog, app.page),
+        nav_button("puzzle", "Моды", Page::Catalog, app.page),
         nav_button("package", "Модпаки", Page::Modpacks, app.page),
     ]
     .spacing(6);
@@ -1280,7 +1307,7 @@ fn sidebar(app: &App) -> Element<'_, Message> {
         "Выбери аккаунт"
     };
 
-    let profile = container(
+    let profile = button(
         row![
             container(icon("user", CYAN, 18.0))
                 .width(38)
@@ -1306,7 +1333,8 @@ fn sidebar(app: &App) -> Element<'_, Message> {
     )
     .padding(10)
     .width(Length::Fill)
-    .style(|_| glass_style(PANEL_LIGHT, EDGE));
+    .style(|_| glass_style(PANEL_LIGHT, EDGE))
+    .on_press(Message::Navigate(Page::Accounts));
 
     container(
         column![
@@ -1332,7 +1360,7 @@ fn sidebar(app: &App) -> Element<'_, Message> {
         .spacing(0)
         .height(Length::Fill),
     )
-    .width(Length::Fixed(238.0))
+    .width(Length::Fixed(174.0))
     .height(Length::Fill)
     .padding(12)
     .style(|_| glass_style(SIDEBAR, EDGE))
@@ -1475,6 +1503,7 @@ fn main_content(app: &App) -> Element<'_, Message> {
         Page::Catalog => catalog_page(app),
         Page::Modpacks => modpacks_page(),
         Page::Downloads => downloads_page(),
+        Page::News => news_page(app),
     }
 }
 
@@ -3472,6 +3501,7 @@ fn icon(
                 "plus" => "M12 4v16 M4 12h16",
                 "trash" => "M4 7h16 M10 11v6 M14 11v6 M6 7l1 14h10l1-14 M9 7V4h6v3",
                 "check" => "m5 12 4 4L19 6",
+                "star" => "m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8-6.2-3.3-6.2 3.3 1.2-6.8-5-4.9 6.9-1L12 2Z",
                 "shield" => "M12 3 20 6v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-3Z M9 12l2 2 4-4",
                 "microsoft" => "M3 3h8v8H3z M13 3h8v8h-8z M3 13h8v8H3z M13 13h8v8h-8z",
                 "loader" => "M20 12a8 8 0 1 1-2.3-5.7",
