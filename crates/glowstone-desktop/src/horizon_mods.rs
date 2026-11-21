@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 
 use glowstone_core::{GameInstance, GamePlatform};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::store;
@@ -581,16 +580,6 @@ pub fn remove(instance_id: &str, project_id: &str) -> Result<Vec<InstalledHorizo
     save_manifest(instance_id, &manifest)?;
     hydrate_installed_icons(&mut manifest.mods);
     Ok(manifest.mods)
-}
-
-fn safe_file_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 180
-        && !name.starts_with('.')
-        && name.ends_with(".hmod")
-        && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'+'))
-        && name != "."
-        && name != ".."
 }
 
 fn hex(bytes: &[u8]) -> String {
