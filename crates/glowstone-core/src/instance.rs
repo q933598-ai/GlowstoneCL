@@ -72,3 +72,50 @@ pub enum InstanceValidationError {
     #[error("An exact loader build can only be pinned to a modded Java profile")]
     LoaderVersionRequiresModdedJava,
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn instance(
+        platform: GamePlatform,
+        loader: LoaderKind,
+        loader_version: Option<&str>,
+    ) -> GameInstance {
+        GameInstance {
+            id: InstanceId("123e4567-e89b-12d3-a456-426614174000".to_owned()),
+            name: "Test".to_owned(),
+            platform,
+            game_version: "1.20.1".to_owned(),
+            loader,
+            loader_version: loader_version.map(str::to_owned),
+            state: InstanceState::NotInstalled,
+        }
+    }
+
+    #[test]
+    fn accepts_an_exact_build_pin_for_a_modded_java_profile() {
+        assert!(instance(GamePlatform::Java, LoaderKind::Fabric, Some("0.15.7")).validate().is_ok());
+        assert!(instance(GamePlatform::Java, LoaderKind::Forge, Some("47.2.0-1.20.1")).validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_unsafe_or_incompatible_loader_build_pins() {
+        assert_eq!(
+            instance(GamePlatform::Java, LoaderKind::Fabric, Some("../outside"))
+                .validate(),
+            Err(InstanceValidationError::InvalidLoaderVersion),
+        );
+        assert_eq!(
+            instance(GamePlatform::Horizon, LoaderKind::HorizonContent, Some("1.0"))
+                .validate(),
+            Err(InstanceValidationError::LoaderVersionRequiresModdedJava),
+        );
+        assert_eq!(
+            instance(GamePlatform::Java, LoaderKind::Vanilla, Some("1.0"))
+                .validate(),
+            Err(InstanceValidationError::LoaderVersionRequiresModdedJava),
+        );
+    }
+}
