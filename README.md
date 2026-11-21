@@ -35,7 +35,6 @@ The Horizon game binary is currently provided for **Linux x86_64** and **Windows
 - in-app mod and modpack installation, updates and dependency resolution;
 - a detailed download queue/progress view and log/crash-report browser;
 - import/export of complete instances and packaged installers for GlowstoneCL;
-- automatic in-game custom skin support for offline profiles in an unmodified Vanilla client. Offline accounts can store and preview skins locally, but Vanilla does not fetch a launcher-local texture; this requires a compatible client mod.
 
 Java, official Horizon and Horizon Offline remain separate runtimes: Java JAR mods are not automatically Horizon mods, and the offline fork is not interchangeable with the official client.
 
