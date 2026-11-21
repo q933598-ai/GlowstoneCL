@@ -529,17 +529,17 @@ fn hero_banner(app: &App) -> Element<'_, Message> {
         stack![
             image::Image::new(app.art.clone())
                 .width(Length::Fill)
-                .height(Length::Fixed(244.0))
+                .height(Length::Fixed(286.0))
                 .content_fit(ContentFit::Cover)
                 .border_radius(18.0),
             overlay,
         ]
         .width(Length::Fill)
-        .height(Length::Fixed(244.0))
+        .height(Length::Fixed(286.0))
         .clip(true),
     )
     .width(Length::Fill)
-    .height(Length::Fixed(244.0))
+    .height(Length::Fixed(286.0))
     .style(|_| glass_style(PANEL, EDGE_BRIGHT))
     .into()
 }
@@ -623,17 +623,17 @@ fn platform_card(
             image::Image::new(art)
                 .crop(crop)
                 .width(Length::Fill)
-                .height(Length::Fixed(166.0))
+                .height(Length::Fixed(190.0))
                 .content_fit(ContentFit::Cover)
                 .border_radius(16.0),
             foreground,
         ]
         .width(Length::Fill)
-        .height(Length::Fixed(166.0))
+        .height(Length::Fixed(190.0))
         .clip(true),
     )
     .width(Length::Fill)
-    .height(Length::Fixed(166.0))
+    .height(Length::Fixed(190.0))
     .style(move |_| glass_style(
         if platform == PlatformChoice::Java {
             Color::from_rgba(0.04, 0.15, 0.07, 0.55)
@@ -671,7 +671,7 @@ fn pack_card(
             image::Image::new(art)
                 .crop(crop)
                 .width(Length::Fill)
-                .height(Length::Fixed(142.0))
+                .height(Length::Fixed(154.0))
                 .content_fit(ContentFit::Cover)
                 .border_radius(13.0),
             container(
@@ -684,7 +684,7 @@ fn pack_card(
                 .padding(10),
             )
             .width(Length::Fill)
-            .height(Length::Fixed(142.0))
+            .height(Length::Fixed(154.0))
             .style(|_| container::Style {
                 background: Some(Color::from_rgba(0.015, 0.025, 0.045, 0.49).into()),
                 border: Border::default().rounded(13).color(EDGE),
@@ -693,11 +693,11 @@ fn pack_card(
             }),
         ]
         .width(Length::Fill)
-        .height(Length::Fixed(142.0))
+        .height(Length::Fixed(154.0))
         .clip(true),
     )
     .width(Length::Fill)
-    .height(Length::Fixed(142.0))
+    .height(Length::Fixed(154.0))
     .style(|_| glass_style(PANEL, EDGE))
     .into()
 }
@@ -776,8 +776,8 @@ fn news_item(
 ) -> Element<'static, Message> {
     row![
         container(text(mark).size(15).color(accent))
-            .width(38)
-            .height(38)
+            .width(44)
+            .height(44)
             .align_x(Alignment::Center)
             .align_y(Alignment::Center)
             .style(move |_| glass_style(
@@ -833,7 +833,7 @@ fn quick_item(
     .into()
 }
 
-fn secondary_page(app: &App) -> Element<'_, Message> {
+fn secondary_page(_app: &App) -> Element<'_, Message> {
     let (title, subtitle, empty, action) = match app.page {
         Page::Instances => (
             "Мои сборки",
