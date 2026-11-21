@@ -2,6 +2,7 @@
 
 mod auth;
 mod game;
+mod horizon_mods;
 mod mods;
 mod store;
 mod skin_preview;
