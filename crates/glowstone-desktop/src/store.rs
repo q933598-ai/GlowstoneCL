@@ -734,6 +734,40 @@ mod tests {
         ).is_err());
     }
 
+    fn make_test_rgb_png(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, width, height);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            let mut pixels = Vec::with_capacity((width * height * 3) as usize);
+            for _ in 0..width * height {
+                pixels.extend_from_slice(&rgba[..3]);
+            }
+            writer.write_image_data(&pixels).unwrap();
+            writer.finish().unwrap();
+        }
+        bytes
+    }
+
+    fn make_test_rgba_png(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, width, height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+            for _ in 0..width * height {
+                pixels.extend_from_slice(&rgba);
+            }
+            writer.write_image_data(&pixels).unwrap();
+            writer.finish().unwrap();
+        }
+        bytes
+    }
+
     fn make_test_png(width: u32, height: u32) -> Vec<u8> {
         let mut bytes = Vec::new();
         {
@@ -747,6 +781,14 @@ mod tests {
             writer.finish().unwrap();
         }
         bytes
+    }
+
+    #[test]
+    fn skin_fingerprint_ignores_png_encoding_and_colour_type() {
+        let rgb = make_test_rgb_png(64, 64, [90, 120, 150, 255]);
+        let rgba = make_test_rgba_png(64, 64, [90, 120, 150, 255]);
+        assert_ne!(rgb, rgba, "the encoded PNG files should differ");
+        assert_eq!(skin_fingerprint(&rgb).unwrap(), skin_fingerprint(&rgba).unwrap());
     }
 
     #[test]
