@@ -23,7 +23,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command as TokioCommand;
 
 use crate::auth;
-use crate::store::{self, AccountKind, AccountProfile};
+use crate::store::{self, AccountKind, AccountProfile, SkinModel};
 use glowstone_core::{GameInstance, GamePlatform, LoaderKind};
 
 const HORIZON_NIGHTLY_API: &str =
@@ -307,6 +307,73 @@ pub async fn launch_instance(
             launch_horizon(instance, data_root, instance_dir, game_account, HorizonFlavor::Offline).await
         }
     }
+}
+
+/// Uploads a locally selected skin to the signed-in Microsoft Minecraft profile.
+/// This changes the account's official skin, so the new texture is used by vanilla
+/// clients and other devices after Minecraft's profile cache refreshes.
+pub async fn apply_microsoft_skin(
+    account: AccountProfile,
+    microsoft_client_id: String,
+    skin_path: PathBuf,
+    model: SkinModel,
+) -> Result<(), String> {
+    if account.kind != AccountKind::Microsoft {
+        return Err("Загрузка в Minecraft Services доступна только для Microsoft-аккаунта.".to_owned());
+    }
+
+    let bytes = tokio::fs::read(&skin_path)
+        .await
+        .map_err(|error| format!("Не удалось прочитать PNG скина: {error}"))?;
+    if bytes.is_empty() || bytes.len() > 2 * 1024 * 1024 {
+        return Err("PNG скина пустой или превышает 2 МБ.".to_owned());
+    }
+
+    let refresh_token = store::load_refresh_token(&account.id)?;
+    let refreshed = auth::refresh_game_account(
+        microsoft_client_id,
+        &account,
+        refresh_token,
+    ).await?;
+
+    if refreshed.kind() != AccountType::Xbox {
+        return Err("Microsoft-сессия не содержит действующий Minecraft access token.".to_owned());
+    }
+    if let Some(rotated) = refreshed.refresh_token.as_deref() {
+        store::store_refresh_token(&account.id, rotated)?;
+    }
+
+    let variant = match model {
+        SkinModel::Classic => "classic",
+        SkinModel::Slim => "slim",
+    };
+    let file = reqwest::multipart::Part::bytes(bytes)
+        .file_name("glowstone-skin.png")
+        .mime_str("image/png")
+        .map_err(|error| format!("Не удалось подготовить PNG для загрузки: {error}"))?;
+    let form = reqwest::multipart::Form::new()
+        .text("variant", variant.to_owned())
+        .part("file", file);
+
+    let response = reqwest::Client::new()
+        .post("https://api.minecraftservices.com/minecraft/profile/skins")
+        .bearer_auth(&refreshed.access_token)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|error| format!("Не удалось отправить скин в Minecraft Services: {error}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        let detail: String = body.chars().take(260).collect();
+        return Err(format!(
+            "Minecraft Services отклонил скин (HTTP {status}). {}",
+            if detail.trim().is_empty() { "Проверь лицензию, формат PNG и доступ к профилю." } else { detail.trim() }
+        ));
+    }
+
+    Ok(())
 }
 
 async fn launch_java(
