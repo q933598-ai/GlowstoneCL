@@ -825,7 +825,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                                 app.wardrobe_skins = collection.skins;
                                 app.wardrobe_active_skin_id = active_skin_id;
                                 app.wardrobe_selected_skin_id = last_skin_id;
-                                refresh_skin_preview(app);
+                                refresh_skin_preview_cache(app);
                                 app.rename_skin_name = app.wardrobe_selected_skin_id.as_ref()
                                     .and_then(|id| app.wardrobe_skins.iter().find(|skin| &skin.id == id))
                                     .map(|skin| skin.name.clone())
@@ -904,6 +904,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                             app.wardrobe_selected_skin_id = next_selected;
                             app.rename_skin_name.clear();
                         }
+                        app.wardrobe_skin_previews.remove(&id);
                         refresh_skin_preview(app);
                         app.notice = Some("Скин удалён из локального гардероба.".into());
                     }
@@ -932,7 +933,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                                     .and_then(|id| app.wardrobe_skins.iter().find(|skin| &skin.id == id))
                                     .map(|skin| skin.name.clone())
                                     .unwrap_or_default();
-                                refresh_skin_preview(app);
+                                refresh_skin_preview_cache(app);
                                 app.notice = Some("Текущий скин Microsoft-профиля синхронизирован с гардеробом.".into());
                             }
                             Err(error) => app.notice = Some(error),
