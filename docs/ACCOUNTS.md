@@ -13,7 +13,7 @@ GlowstoneCL supports two account types:
 4. Sign in and approve the request in the browser. CrustCore waits for approval automatically; there is no need to return and press a confirmation button.
 5. After Microsoft completes Xbox Live, XSTS and Minecraft Services authentication, GlowstoneCL adds the Minecraft profile and selects it.
 
-By default GlowstoneCL uses CrustCore's official Minecraft Launcher public client ID. You do **not** need to register your own Microsoft Entra application for the standard sign-in.
+By default GlowstoneCL uses CrustCore's official Minecraft Launcher public client ID. You do **not** need to register your own Microsoft Entra application for the standard sign-in. To switch back from an old custom ID, clear the optional field and click **Войти через Microsoft**; GlowstoneCL saves the empty value before starting the browser flow. If an account was originally signed in with a different custom ID, sign in again after switching so its refresh token belongs to the selected client.
 
 ## Optional custom Microsoft Client ID
 
