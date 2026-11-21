@@ -27,8 +27,8 @@ Modrinth and pass verification before it is renamed into place. The installer
 uses Modrinth's HTTPS CDN and enforces filename and file-size limits.
 
 Vanilla Java has no mod loader, so the catalogue rejects it. Modrinth Java JARs
-are not installed into Horizon or Horizon Offline: those runtimes use their own
-HMOD/HNMOD content formats.
+are not installed into Horizon or Horizon Offline: those runtimes use the
+Horizon Registry and their own `.hmod` package format.
 
 The selected instance gets its own game folder. Offline accounts work only in
 offline-mode play; Microsoft accounts are refreshed before launch.
@@ -53,9 +53,26 @@ The current Horizon binary assets selected by GlowstoneCL are:
 - Windows x64.
 
 Other architectures and operating systems are not yet enabled by this
-backend. Horizon is a separate runtime: Java JAR mods are not directly
-compatible with it, and its content/native mod packages must follow the
-format and API of the selected Horizon build.
+backend. Horizon is a separate runtime: Java JAR mods are not compatible with
+it. Content HMOD packages are installed through the Horizon Registry; the
+native-mod build pipeline is not yet exposed by GlowstoneCL.
+
+## Horizon Registry mods
+
+The Horizon mod browser reads the reviewed `https://horizon-rust.github.io/horizon-mods/index.json` registry. It currently lists only
+`kind = "mod"` packages for Minecraft 26.3 whose selected release is an
+`.hmod` content package with the `registries` capability. The browser caches registry
+icons and keeps an installation manifest beside each instance's
+`horizon-mods/` directory. It writes enabled entries to the instance's
+`horizon-mods.txt` file (`mod.<id>:true`).
+
+Each download is checked against the registry's byte size and SHA-256, checked
+against the current revoked list, and inspected for a root `horizon-mod.toml` whose
+ID, version, API 0.2 and `registries` capability match the index. GlowstoneCL
+refuses packages with a configured minisign key/signature until signature
+verification is implemented, and also refuses `[native]` and `[wasm]`
+manifest sections. Native Horizon mods require a separate build pipeline and
+are intentionally not treated as ordinary content mods.
 
 ## Horizon Offline
 
@@ -96,7 +113,8 @@ The desktop crate currently contains the runtime integrations:
 
 - `auth.rs` — Microsoft browser Device Code Flow through CrustCore, profile checks and CrustCore account construction;
 - `game.rs` — CrustCore Java installer/launcher, signed official Horizon release selection, and separate Horizon Offline fork integration;
-- `mods.rs` — Modrinth search, compatibility selection, required-dependency resolution, hash-verified JAR installation and manifest-scoped removal;
+- `mods.rs` — Modrinth search, compatibility selection, required-dependency resolution, hash-verified JAR installation, cached project icons and manifest-scoped removal;
+- `horizon_mods.rs` — Horizon Registry search, cached icons, unsigned HMOD installation, SHA-256/revocation/manifest checks, enabled-state tracking and manifest-scoped removal;
 - `store.rs` — instance metadata, per-instance workspaces, OS credential storage, and per-account skin collections;
 - `skin_preview.rs` — textured 3D player preview built from the Minecraft skin atlas on Iced Canvas;
 - `ui.rs` — desktop controls for authentication, launching, and the multi-account skin wardrobe.
