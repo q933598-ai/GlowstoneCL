@@ -263,6 +263,17 @@ async fn launch_horizon(
     let pins = build.pins()?;
     validate_horizon_version(&instance.game_version, &pins.version)?;
 
+    let client_api = query_launch_api(&build.client(), &build.directory).await?;
+    let client_version = client_api["minecraft"]
+        .as_str()
+        .ok_or_else(|| "Horizon client не сообщил версию Minecraft.".to_owned())?;
+    if client_version != pins.version {
+        return Err(format!(
+            "Horizon client собран для Minecraft {client_version}, но research-lock.json закрепляет {}.",
+            pins.version
+        ));
+    }
+
     let prepare_api = query_launch_api(&build.preparer(), &build.directory).await?;
     let advertised_version = prepare_api["minecraft"]
         .as_str()
@@ -349,7 +360,18 @@ async fn ensure_horizon_build(
     let version = nightly_version(&release)?;
     let target = versions_dir.join(&version);
     if target.join(HORIZON_INSTALLED_MARKER).is_file() {
-        return Ok(HorizonBuild { version, directory: target });
+        let candidate = HorizonBuild {
+            version: version.clone(),
+            directory: target.clone(),
+        };
+        if candidate.client().is_file()
+            && candidate.preparer().is_file()
+            && candidate.pins().is_ok()
+        {
+            return Ok(candidate);
+        }
+        // A marker alone is not proof of a complete install. Re-download and
+        // replace a damaged folder instead of failing later during launch.
     }
 
     let find_asset = |name: &str| {
