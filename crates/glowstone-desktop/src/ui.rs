@@ -2910,11 +2910,13 @@ fn refresh_skin_preview(app: &mut App) {
 }
 
 fn refresh_skin_preview_cache(app: &mut App) {
+    let account_uuid = wardrobe_account(app).map(|account| account.uuid.clone());
+    let skin_ids: Vec<String> = app.wardrobe_skins.iter().map(|skin| skin.id.clone()).collect();
     app.wardrobe_skin_previews.clear();
-    if let Some(account) = wardrobe_account(app) {
-        for skin in &app.wardrobe_skins {
-            if let Ok(texture) = store::load_skin_pixels(&account.uuid, &skin.id) {
-                app.wardrobe_skin_previews.insert(skin.id.clone(), texture);
+    if let Some(account_uuid) = account_uuid {
+        for skin_id in skin_ids {
+            if let Ok(texture) = store::load_skin_pixels(&account_uuid, &skin_id) {
+                app.wardrobe_skin_previews.insert(skin_id, texture);
             }
         }
     }
