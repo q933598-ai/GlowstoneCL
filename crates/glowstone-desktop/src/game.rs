@@ -99,7 +99,7 @@ pub async fn launch_instance(
     }
 }
 
-async async fn launch_java(
+async fn launch_java(
     instance: GameInstance,
     data_root: PathBuf,
     account: GameAccount,
