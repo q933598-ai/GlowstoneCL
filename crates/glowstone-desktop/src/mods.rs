@@ -267,6 +267,39 @@ fn save_manifest(instance_id: &str, manifest: &InstalledManifest) -> Result<(), 
         .map_err(|error| format!("Не удалось обновить список модов: {error}"))
 }
 
+/// Resolve icon URLs for mods installed by older GlowstoneCL builds, whose
+/// manifest predates icon_url. This never changes the installed JAR itself.
+pub async fn refresh_installed_icons(instance_id: String) -> Result<Vec<InstalledMod>, String> {
+    let mut manifest = read_manifest(&instance_id)?;
+    let http = client()?;
+    let mut changed = false;
+    for item in &mut manifest.mods {
+        if cached_icon("modrinth", &item.project_id).is_some() {
+            continue;
+        }
+        let Ok(project) = get_project(&http, &item.project_id).await else {
+            continue;
+        };
+        let Some(icon_url) = project["icon_url"].as_str().map(str::to_owned) else {
+            continue;
+        };
+        if let Some(icon_data) = cache_remote_icon(
+            &http,
+            "modrinth",
+            &item.project_id,
+            Some(&icon_url),
+        ).await {
+            item.icon_url = Some(icon_url);
+            item.icon_data = Some(icon_data);
+            changed = true;
+        }
+    }
+    if changed {
+        save_manifest(&instance_id, &manifest)?;
+    }
+    installed(&instance_id)
+}
+
 pub fn installed(instance_id: &str) -> Result<Vec<InstalledMod>, String> {
     let mut mods = read_manifest(instance_id)?.mods;
     mods.retain(|item| {
