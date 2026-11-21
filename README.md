@@ -21,7 +21,9 @@ The `test/glowstonecl` branch includes:
 - **Horizon installation and launch**: the selected official game release (Nightly or tagged version) is downloaded, its Ed25519 signature and archive SHA-256 are checked, and the binary's Launch API is queried before use;
 - **Horizon Offline** installation and launch from a separate signed fork, without Microsoft session injection; it imports existing local Minecraft 26.3 files from .minecraft or Prism/MultiMC and does not download the client jar for an offline profile;
 - Java version catalogue from Mojang, including `release`, `snapshot`, `old_beta` and `old_alpha`; Horizon catalogues from the official and offline-fork GitHub game releases, with pagination and install-by-selected-release ID;
-- **Modrinth mod catalogue and installer** for Java profiles with Fabric, Forge, NeoForge and Quilt: search is filtered by the instance's Minecraft version and loader, compatible JARs and required Modrinth dependencies are installed into that instance's `mods/` directory, and SHA-1/SHA-512 hashes are checked before installation; the launcher tracks its own downloads and removes only those tracked files;
+- **Modrinth mod catalogue and installer** for Java profiles with Fabric, Forge, NeoForge and Quilt: search is filtered by the instance's Minecraft version and loader, compatible JARs and required Modrinth dependencies are installed into that instance's `mods/` directory, SHA-1/SHA-512 hashes are checked, project icons are cached, and the launcher tracks/removes only the files it installed;
+- **Horizon Registry content-mod catalogue** for Horizon and Horizon Offline profiles: reviewed `kind = mod` HMODs for Minecraft 26.3 are searched and installed into that instance's `horizon-mods/` directory, with SHA-256, revoked-file, package manifest, ID, version and API checks. GlowstoneCL enables installed mods through `horizon-mods.txt`. Signed packages are shown but not installed yet because minisign verification is not implemented; native-mod and WebAssembly packages are not installed by this content-only path;
+- a per-instance **Моды** action on every non-Vanilla Java or Horizon build card; Vanilla Java profiles correctly have no mod-install action;
 - automatic download of the Mojang game files and Java version required by official Horizon, followed by resource preparation and launch through `--session-stdin`;
 - Microsoft browser sign-in through CrustCore using the official Minecraft Launcher public client by default (optional custom Client ID), followed by Xbox Live, XSTS and Minecraft Services, including ownership / Game Pass checks;
 - Microsoft refresh-token storage in the operating system credential store, with session refresh before launching a game;
@@ -97,7 +99,10 @@ A custom Microsoft Application (client) ID is optional. GlowstoneCL uses CrustCo
 | Horizon Offline fork | Implemented as a separate runtime; requires local Minecraft 26.3 + Java 25 |
 | Microsoft browser sign-in (official client by default) and token refresh | Implemented |
 | Modrinth Java mod catalogue and installation | Implemented for Fabric, Forge, NeoForge and Quilt; version/loader filtered |
-| Required Modrinth mod dependencies and file hash verification | Implemented |
+| Required Modrinth mod dependencies, cached icons and file hash verification | Implemented |
+| Horizon Registry content-HMOD catalogue, SHA-256 and manifest checks | Implemented for unsigned Minecraft 26.3 content mods |
+| Per-instance mod action on non-Vanilla Java and Horizon builds | Implemented |
+| Native Horizon mod builds, signed HMOD verification and WebAssembly HMOD support | Planned |
 | CurseForge catalogue and modpack installation | Planned |
 | Automatic mod updates and download queue/progress UI | Planned |
 | Download queue, detailed progress and logs UI | Planned |
