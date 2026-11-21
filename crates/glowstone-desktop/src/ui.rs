@@ -1510,7 +1510,7 @@ fn settings_page(app: &App) -> Element<'_, Message> {
     };
 
     column![
-        settings_card("ВНЕШНИЙ ВИД", "Шрифт интерфейса", "Используется системный Noto Sans с поддержкой кириллицы. Если он не установлен, система выберет резервный sans-serif."),
+        settings_card("ВНЕШНИЙ ВИД", "Шрифт интерфейса", "На Linux используется Inter, на Windows — Segoe UI. Установи Inter через пакет inter-font в CachyOS/Arch."),
         settings_card("LINUX DISPLAY", "Нативный Wayland и X11", "GlowstoneCL поддерживает оба backend. В Wayland-сессии можно запускать приложение напрямую через Wayland без XWayland."),
         settings_card("ХРАНЕНИЕ", "Профили и сборки", data_path),
         settings_card("БЕЗОПАСНОСТЬ", "Microsoft refresh token", "Токены сохраняются через системное хранилище паролей. Если Secret Service недоступен, приложение покажет предупреждение."),
