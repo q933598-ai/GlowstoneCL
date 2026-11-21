@@ -21,6 +21,9 @@ pub struct GameInstance {
     pub platform: GamePlatform,
     pub game_version: String,
     pub loader: LoaderKind,
+    /// Exact loader build pinned by imported modpacks; absent for ordinary profiles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loader_version: Option<String>,
     pub state: InstanceState,
 }
 
