@@ -702,10 +702,7 @@ async fn ensure_horizon_build(
         return Err("SHA-256 архива Horizon не совпадает с подписанным SHA256SUMS.".to_owned());
     }
 
-    if !version
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-    {
+    if !valid_horizon_version_id(&version) {
         return Err("GitHub вернул некорректное имя версии Horizon.".to_owned());
     }
 
@@ -846,13 +843,18 @@ fn horizon_release_version(release: &GithubRelease) -> Result<String, String> {
         return nightly_version(release);
     }
     let tag = release.tag_name.trim();
-    if tag.is_empty()
-        || tag.len() > 80
-        || !tag.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'@'))
-    {
+    if !valid_horizon_version_id(tag) {
         return Err("GitHub вернул некорректный tag Horizon.".to_owned());
     }
     Ok(tag.to_owned())
+}
+
+fn valid_horizon_version_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 80
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'@')
+        })
 }
 
 fn valid_date(value: &str) -> bool {
@@ -1390,6 +1392,14 @@ mod tests {
         assert!(validate_horizon_build_pin(HorizonFlavor::Offline, "1.21.1", 25).is_err());
         assert!(validate_horizon_build_pin(HorizonFlavor::Offline, "26.3", 21).is_err());
         assert!(validate_horizon_build_pin(HorizonFlavor::Official, "26.3", 25).is_ok());
+    }
+
+    #[test]
+    fn horizon_version_paths_accept_semver_tags_with_dots() {
+        assert!(valid_horizon_version_id("v0.2.97.1"));
+        assert!(valid_horizon_version_id("nightly-2026-11-21-8f83e5c"));
+        assert!(!valid_horizon_version_id("../v0.2.97.1"));
+        assert!(!valid_horizon_version_id("v0.2.97.1/../../outside"));
     }
 
     #[test]
