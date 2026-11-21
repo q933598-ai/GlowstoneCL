@@ -174,8 +174,6 @@ struct GithubRelease {
     #[serde(default)]
     title: String,
     tag_name: String,
-    #[serde(default)]
-    published_at: String,
     assets: Vec<GithubAsset>,
 }
 
@@ -326,7 +324,7 @@ async fn ensure_horizon_build(
         }
     };
     let asset_name = horizon_asset_name()?;
-    let version = nightly_version(&release);
+    let version = nightly_version(&release)?;
     let target = versions_dir.join(&version);
     if target.join(HORIZON_INSTALLED_MARKER).is_file() {
         return Ok(HorizonBuild { version, directory: target });
@@ -341,7 +339,10 @@ async fn ensure_horizon_build(
             .ok_or_else(|| format!("В релизе Horizon отсутствует файл {name}."))
     };
     let sums_url = find_asset("SHA256SUMS")?;
-    let signature_url = find_asset("SHA256SUMS.sig")?;
+    // Nightly releases are signed for their exact date+commit identity.
+    // The channel signature (SHA256SUMS.sig) is retained only for older
+    // launchers and must not be used to accept a new Nightly build.
+    let signature_url = find_asset("SHA256SUMS.v2.sig")?;
     let archive_url = find_asset(asset_name)?;
 
     let (sums_response, signature_response) = tokio::try_join!(
@@ -361,7 +362,7 @@ async fn ensure_horizon_build(
         .text()
         .await
         .map_err(|error| error.to_string())?;
-    verify_horizon_signature(&release.tag_name, &sums, &signature)?;
+    verify_horizon_signature(&version, &sums, &signature)?;
 
     let expected_sha256 = expected_sha256(&sums, asset_name)?;
     let archive_response = client
@@ -472,22 +473,26 @@ fn horizon_asset_name() -> Result<&'static str, String> {
     }
 }
 
-fn nightly_version(release: &GithubRelease) -> String {
-    let mut parts = release
+fn nightly_version(release: &GithubRelease) -> Result<String, String> {
+    // Horizon's v2 signature binds a Nightly to the date and commit in its
+    // release title. Never infer this identity from GitHub's publication time:
+    // that would let an old artifact be presented under a newer timestamp.
+    let title = release
         .title
         .strip_prefix("Nightly ")
-        .unwrap_or("")
-        .split(" · ");
-    let title_date = parts.next().filter(|value| valid_date(value));
-    let fallback_date = release.published_at.get(..10).filter(|value| valid_date(value));
-    let date = title_date.or(fallback_date).unwrap_or("unknown-date");
-    let commit = parts
-        .next()
-        .filter(|value| !value.is_empty() && value.bytes().all(|b| b.is_ascii_hexdigit()));
-    match commit {
-        Some(commit) => format!("nightly-{date}-{commit}"),
-        None => format!("nightly-{date}"),
+        .ok_or_else(|| "Заголовок релиза Horizon не содержит Nightly identity.".to_owned())?;
+    let (date, commit) = title
+        .split_once(" · ")
+        .ok_or_else(|| "Заголовок Nightly Horizon не содержит commit.".to_owned())?;
+    if !valid_date(date) {
+        return Err("Дата в заголовке Nightly Horizon имеет неверный формат.".to_owned());
     }
+    if !(7..=40).contains(&commit.len())
+        || !commit.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err("Commit в заголовке Nightly Horizon имеет неверный формат.".to_owned());
+    }
+    Ok(format!("nightly-{date}-{commit.to_ascii_lowercase()}"))
 }
 
 fn valid_date(value: &str) -> bool {
@@ -502,12 +507,7 @@ fn valid_date(value: &str) -> bool {
 }
 
 fn verify_horizon_signature(tag: &str, sums: &[u8], signatures: &str) -> Result<(), String> {
-    let signed_tag = if tag == "nightly" || tag.starts_with("nightly-") {
-        "nightly"
-    } else {
-        tag
-    };
-    let mut message = format!("{HORIZON_SIGNATURE_DOMAIN}{signed_tag}\n").into_bytes();
+    let mut message = format!("{HORIZON_SIGNATURE_DOMAIN}{tag}\n").into_bytes();
     message.extend_from_slice(sums);
     let key = base64::engine::general_purpose::STANDARD
         .decode(HORIZON_RELEASE_KEY)
