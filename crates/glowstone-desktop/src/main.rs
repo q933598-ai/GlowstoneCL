@@ -8,7 +8,7 @@ fn main() -> iced::Result {
     iced::application(ui::App::default, ui::update, ui::view)
         .title("GlowstoneCL")
         .theme(iced::Theme::Dark)
-        .window_size(iced::Size::new(1280.0, 820.0))
+        .window_size(iced::Size::new(1360.0, 860.0))
         .centered()
         .run()
 }
