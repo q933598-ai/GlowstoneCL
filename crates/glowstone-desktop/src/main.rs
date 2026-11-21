@@ -5,6 +5,7 @@ mod curseforge;
 mod game;
 mod horizon_mods;
 mod mods;
+mod modpacks;
 mod store;
 mod skin_preview;
 mod ui;
