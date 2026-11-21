@@ -1,6 +1,11 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crust_core::authenticator::{
+    Account as GameAccount, AccountMeta, AccountProfile as GameAccountProfile,
+    AccountType, Authenticator, Ownership,
+};
+
 use crate::store::{AccountKind, AccountProfile};
 
 const DEVICE_CODE_ENDPOINT: &str =
@@ -360,4 +365,59 @@ async fn authenticate_minecraft(microsoft_access_token: &str) -> Result<AccountP
         uuid: canonical_uuid,
         kind: AccountKind::Microsoft,
     })
+}
+
+
+/// Creates a CrustCore account from an existing offline profile.
+pub fn offline_game_account(profile: &AccountProfile) -> GameAccount {
+    GameAccount {
+        access_token: String::new(),
+        client_token: uuid::Uuid::new_v4().to_string(),
+        uuid: profile.uuid.replace('-', ""),
+        name: profile.name.clone(),
+        refresh_token: None,
+        user_properties: "{}".to_owned(),
+        meta: AccountMeta::offline(AccountType::Mojang, false),
+        xbox_account: None,
+        profile: GameAccountProfile::default(),
+        client_id: None,
+        user_info: None,
+    }
+}
+
+/// Refreshes a Microsoft session for launching a game. Only the refresh token is loaded
+/// from the OS credential store; the short-lived Minecraft access token stays in memory.
+pub async fn refresh_game_account(
+    client_id: String,
+    profile: &AccountProfile,
+    refresh_token: String,
+) -> Result<GameAccount, String> {
+    let client_id = client_id.trim().to_owned();
+    if client_id.is_empty() {
+        return Err("Сначала укажи Microsoft Client ID в разделе «Аккаунты».".to_owned());
+    }
+
+    let authenticator = Authenticator::with_client_id(client_id)
+        .map_err(|error| format!("Не удалось инициализировать Microsoft: {error}"))?;
+
+    // An empty, expired access token forces CrustCore to exchange the stored
+    // Microsoft refresh token for a fresh Xbox/XSTS/Minecraft session.
+    let stored = GameAccount {
+        access_token: String::new(),
+        client_token: uuid::Uuid::new_v4().to_string(),
+        uuid: profile.uuid.replace('-', ""),
+        name: profile.name.clone(),
+        refresh_token: Some(refresh_token),
+        user_properties: "{}".to_owned(),
+        meta: AccountMeta::xbox(0, Ownership::Unknown, Vec::new()),
+        xbox_account: None,
+        profile: GameAccountProfile::default(),
+        client_id: Some(client_id),
+        user_info: None,
+    };
+
+    authenticator
+        .refresh(&stored)
+        .await
+        .map_err(|error| format!("Не удалось обновить Microsoft-сессию: {error}"))
 }
