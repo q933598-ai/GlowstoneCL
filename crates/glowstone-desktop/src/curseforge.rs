@@ -209,7 +209,7 @@ fn valid_jar_name(value: &str) -> Option<&str> {
 fn digest(bytes: &[u8]) -> String {
     let value = Sha1::digest(bytes);
     let mut result = String::with_capacity(value.len() * 2);
-    for byte in value {
+    for byte in value.iter() {
         use std::fmt::Write as _;
         let _ = write!(result, "{byte:02x}");
     }
