@@ -138,13 +138,14 @@ impl<Message> canvas::Program<Message> for SkinPreview {
 
         tiles.sort_by(|a, b| a.depth.total_cmp(&b.depth));
         for tile in tiles {
-            let mut builder = canvas::Path::builder();
-            builder.move_to(tile.points[0]);
-            builder.line_to(tile.points[1]);
-            builder.line_to(tile.points[2]);
-            builder.line_to(tile.points[3]);
-            builder.close();
-            frame.fill(&builder.build(), tile.color);
+            let path = canvas::Path::new(|builder| {
+                builder.move_to(tile.points[0]);
+                builder.line_to(tile.points[1]);
+                builder.line_to(tile.points[2]);
+                builder.line_to(tile.points[3]);
+                builder.close();
+            });
+            frame.fill(&path, tile.color);
         }
 
         vec![frame.into_geometry()]
