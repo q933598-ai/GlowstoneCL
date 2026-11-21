@@ -1,0 +1,21 @@
+[package]
+name = "glowstonecl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["linux-wayland", "linux-x11"]
+linux-wayland = ["iced/wayland"]
+linux-x11 = ["iced/x11"]
+
+[dependencies]
+glowstone-core = { path = "../glowstone-core" }
+iced = { version = "0.14.0", default-features = false, features = [
+    "wgpu",
+    "tiny-skia",
+    "crisp",
+    "web-colors",
+    "thread-pool",
+] }

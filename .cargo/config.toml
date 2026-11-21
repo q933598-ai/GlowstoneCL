@@ -1,0 +1,4 @@
+[alias]
+run-glowstone = "run --package glowstonecl"
+check-all = "check --workspace --all-targets"
+test-all = "test --workspace"
