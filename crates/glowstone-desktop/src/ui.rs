@@ -96,6 +96,7 @@ pub enum Message {
     DeleteSkin(String),
     ApplySkin(String),
     SkinApplied(String, Result<(), String>),
+    MicrosoftSkinLoaded(String, Result<Option<(Vec<u8>, store::SkinModel)>, String>),
     RotateSkinPreview(f32),
     MicrosoftClientIdChanged(String),
     SaveMicrosoftClientId,
@@ -145,11 +146,8 @@ impl Default for App {
         let data = store::load();
         let wardrobe_account_id = data.settings.selected_account_id.as_ref()
             .and_then(|id| data.accounts.iter().find(|account| &account.id == id))
-            .filter(|account| account.kind == AccountKind::Offline)
             .map(|account| account.id.clone())
-            .or_else(|| data.accounts.iter()
-                .find(|account| account.kind == AccountKind::Offline)
-                .map(|account| account.id.clone()));
+            .or_else(|| data.accounts.first().map(|account| account.id.clone()));
         let wardrobe_collection = wardrobe_account_id.as_ref()
             .and_then(|id| data.accounts.iter().find(|account| &account.id == id))
             .and_then(|account| store::load_skin_collection(&account.uuid).ok())
@@ -197,6 +195,16 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             if page == Page::Wardrobe {
                 ensure_wardrobe_account(app);
                 refresh_wardrobe(app);
+                if let Some(account) = wardrobe_account(app)
+                    .filter(|account| account.kind == AccountKind::Microsoft)
+                    .cloned()
+                {
+                    let uuid = account.uuid.clone();
+                    return iced::Task::perform(
+                        game::fetch_microsoft_skin(account, app.client_id.clone()),
+                        move |result| Message::MicrosoftSkinLoaded(uuid, result),
+                    );
+                }
             }
             if page == Page::Instances && app.version_platform != Some(app.platform.into()) {
                 let platform = app.platform.into();
@@ -431,6 +439,16 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 app.skin_name.clear();
                 refresh_wardrobe(app);
                 app.notice = None;
+                if let Some(account) = wardrobe_account(app)
+                    .filter(|account| account.kind == AccountKind::Microsoft)
+                    .cloned()
+                {
+                    let uuid = account.uuid.clone();
+                    return iced::Task::perform(
+                        game::fetch_microsoft_skin(account, app.client_id.clone()),
+                        move |result| Message::MicrosoftSkinLoaded(uuid, result),
+                    );
+                }
             } else {
                 app.notice = Some("Игровой аккаунт не найден.".into());
             }
@@ -440,7 +458,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         Message::SkinModelChanged(model) => app.skin_model = model,
         Message::PickSkinFile => {
             let Some(account_id) = app.wardrobe_account_id.as_deref() else {
-                app.notice = Some("Сначала выбери offline-аккаунт.".into());
+                app.notice = Some("Сначала выбери игровой аккаунт.".into());
                 return iced::Task::none();
             };
             let Some(account) = app.data.accounts.iter().find(|account| account.id == account_id) else {
@@ -530,7 +548,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                             .find(|skin| skin.id == id)
                             .map(|skin| skin.name.clone())
                             .unwrap_or_default();
-                        app.notice = Some("Активный скин сохранён для этого offline-аккаунта.".into());
+                        app.notice = Some("Активный скин выбран в локальном гардеробе этого аккаунта.".into());
                     }
                     Err(error) => app.notice = Some(error),
                 }
@@ -578,6 +596,42 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                         app.notice = Some("Скин удалён из локального гардероба.".into());
                     }
                     Err(error) => app.notice = Some(error),
+                }
+            }
+        }
+        Message::MicrosoftSkinLoaded(account_uuid, result) => {
+            let is_current = wardrobe_account(app)
+                .is_some_and(|account| account.uuid == account_uuid);
+            if is_current {
+                match result {
+                    Ok(Some((bytes, model))) => {
+                        match store::import_skin_if_missing(
+                            &account_uuid,
+                            "Текущий скин Microsoft",
+                            &bytes,
+                            model,
+                        ) {
+                            Ok(collection) => {
+                                app.wardrobe_skins = collection.skins;
+                                app.wardrobe_active_skin_id = collection.active_skin_id.clone();
+                                app.wardrobe_selected_skin_id = collection.active_skin_id
+                                    .or_else(|| app.wardrobe_skins.first().map(|skin| skin.id.clone()));
+                                app.rename_skin_name = app.wardrobe_selected_skin_id.as_ref()
+                                    .and_then(|id| app.wardrobe_skins.iter().find(|skin| &skin.id == id))
+                                    .map(|skin| skin.name.clone())
+                                    .unwrap_or_default();
+                                refresh_skin_preview(app);
+                                app.notice = Some("Текущий скин Microsoft-профиля синхронизирован с гардеробом.".into());
+                            }
+                            Err(error) => app.notice = Some(error),
+                        }
+                    }
+                    Ok(None) => {
+                        app.notice = Some("В Minecraft-профиле пока нет установленного скина.".into());
+                    }
+                    Err(error) => {
+                        app.notice = Some(format!("Не удалось получить скин Microsoft-профиля: {error}"));
+                    }
                 }
             }
         }
