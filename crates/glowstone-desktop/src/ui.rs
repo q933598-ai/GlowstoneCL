@@ -454,12 +454,16 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     app.mod_target_instance = Some(instance.id.0.clone());
                     match instance.platform {
                         GamePlatform::Java => {
+                            app.mod_source = ModSource::Modrinth;
                             app.installed_mods = mods::installed(&instance.id.0).unwrap_or_default();
+                            app.curseforge_installed_mods = curseforge::installed(&instance.id.0).unwrap_or_default();
                             app.horizon_installed_mods.clear();
                         }
                         GamePlatform::Horizon | GamePlatform::HorizonOffline => {
+                            app.mod_source = ModSource::Horizon;
                             app.horizon_installed_mods = horizon_mods::installed(&instance.id.0).unwrap_or_default();
                             app.installed_mods.clear();
+                            app.curseforge_installed_mods.clear();
                         }
                     }
                 }
@@ -651,6 +655,14 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 app.mods_error = Some("Vanilla не поддерживает установку модов. Выбери Java-сборку с загрузчиком или Horizon.".to_owned());
                 return iced::Task::none();
             };
+            if app.mod_source == ModSource::CurseForge {
+                if instance.platform != GamePlatform::Java {
+                    app.mods_error = Some("CurseForge принимает Java-сборки с мод-загрузчиком.".to_owned());
+                    return iced::Task::none();
+                }
+                app.mod_target_instance = Some(instance.id.0.clone());
+                return start_curseforge_search(app);
+            }
             return start_catalog_search(app, instance);
         }
         Message::OpenInstanceMods(target_id) => {
