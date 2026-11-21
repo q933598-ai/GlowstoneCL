@@ -371,8 +371,8 @@ async fn authenticate_minecraft(microsoft_access_token: &str) -> Result<AccountP
 /// Creates a CrustCore account from an existing offline profile.
 pub fn offline_game_account(profile: &AccountProfile) -> GameAccount {
     GameAccount {
-        access_token: String::new(),
-        client_token: uuid::Uuid::new_v4().to_string(),
+        access_token: profile.uuid.replace('-', ""),
+        client_token: profile.uuid.replace('-', ""),
         uuid: profile.uuid.replace('-', ""),
         name: profile.name.clone(),
         refresh_token: None,
