@@ -470,7 +470,7 @@ fn sidebar(app: &App) -> Element<'_, Message> {
 
     let platforms = column![
         section_label("ПЛАТФОРМЫ"),
-        platform_nav("java", "Minecraft Java", PlatformChoice::Java, app.platform),
+        platform_nav("minecraft", "Minecraft Java", PlatformChoice::Java, app.platform),
         platform_nav("horizon", "Minecraft Horizon", PlatformChoice::Horizon, app.platform),
     ]
     .spacing(6);
@@ -1260,7 +1260,7 @@ fn instance_card(instance: &GameInstance, selected: bool) -> Element<'static, Me
     container(
         row![
             container(icon(
-                if instance.platform == GamePlatform::Java { "java" } else { "horizon" },
+                if instance.platform == GamePlatform::Java { "minecraft" } else { "horizon" },
                 if instance.platform == GamePlatform::Java { GREEN } else { ORANGE },
                 20.0,
             ))
@@ -1710,47 +1710,70 @@ fn icon(
     color: Color,
     size: f32,
 ) -> Element<'static, Message> {
-    let path = match name {
-        "java" => "M6 3c-2 4 3 5 0 9 M12 2c-2 4 3 6 0 10 M18 3c-2 4 3 5 0 9 M5 15h14l-2 5H7l-2-5Z M3 22h18",
-        "minecraft" => "M12 2 22 7.5v9L12 22 2 16.5v-9L12 2Z M2 7.5l10 5.5 10-5.5 M12 13v9 M7 4.8l10 5.5",
-        "modrinth" => "M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z M7.5 7.5h1 M16.5 7.5h1 M7.5 16.5h1 M16.5 16.5h1",
-        "curseforge" => "M12 2c3 4-2 6 1 9 2-2 4-3 4-6 4 5 5 10 1 14-4 4-11 3-13-2-2-4 0-9 4-12 0 4 1 5 3 6 1-3-1-5 0-9Z",
-        "discord" => "M7 7c3-2 7-2 10 0l2 10c-3 2-11 2-14 0L7 7Z M9 12h.01 M15 12h.01 M8 8 6 5 M16 8l2-3",
-        "diamond" => "M12 2 21 9 12 22 3 9 12 2Z M3 9h18 M8 9l4 13 4-13 M8 9l4-7 4 7",
-        "home" => "M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3V10.5Z",
-        "instances" => "M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z",
-        "puzzle" => "M8 4a2 2 0 1 1 4 0v2h4v4h2a2 2 0 1 1 0 4h-2v4h-4v-2a2 2 0 1 0-4 0v2H4v-4h2a2 2 0 1 0 0-4H4V6h4V4Z",
-        "package" => "m12 3 9 5v8l-9 5-9-5V8l9-5Z M3 8l9 5 9-5 M12 13v8 M7.5 5.5l9 5",
-        "download" => "M12 3v12m0 0 4-4m-4 4-4-4 M4 18v3h16v-3",
-        "user" => "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M4 21a8 8 0 0 1 16 0",
-        "settings" => "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 3.1-.2-.1a1.7 1.7 0 0 0-1.9.2l-.1.1h-3.6l-.1-.2a1.7 1.7 0 0 0-1.6-1 1.7 1.7 0 0 0-1.1.4l-.2.1-3.1-1.8.1-.2a1.7 1.7 0 0 0-.2-1.9l-.1-.1v-3.6l.2-.1a1.7 1.7 0 0 0 .6-2.7l-.1-.2 1.8-3.1.2.1a1.7 1.7 0 0 0 1.9-.2l.1-.1h3.6l.1.2a1.7 1.7 0 0 0 2.7.6l.2-.1 3.1 1.8-.1.2a1.7 1.7 0 0 0 .2 1.9l.1.1V15Z",
-        "search" => "M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15Z M16 16l5 5",
-        "community" => "M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2 M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M20 8v6 M17 11h6",
-        "globe" => "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z M2 12h20 M12 2a15 15 0 0 1 0 20 M12 2a15 15 0 0 0 0 20",
-        "chevron-down" => "m6 9 6 6 6-6",
-        "chevron-right" => "m9 18 6-6-6-6",
-        "arrow-right" => "M4 12h16 M13 5l7 7-7 7",
-        "play" => "m8 5 12 7-12 7V5Z",
-        "plus" => "M12 4v16 M4 12h16",
-        "trash" => "M4 7h16 M10 11v6 M14 11v6 M6 7l1 14h10l1-14 M9 7V4h6v3",
-        "check" => "m5 12 4 4L19 6",
-        "shield" => "M12 3 20 6v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-3Z M9 12l2 2 4-4",
-        "microsoft" => "M3 3h8v8H3z M13 3h8v8h-8z M3 13h8v8H3z M13 13h8v8h-8z",
-        "loader" => "M20 12a8 8 0 1 1-2.3-5.7",
-        "forge" => "M12 2c2 4-2 5 0 8 1-2 4-3 4-6 4 5 5 9 2 13a8 8 0 0 1-12 0c-3-4-1-9 3-12 0 4 1 5 3 6 2-3-1-5 0-9Z",
-        "horizon" => "M3 18 8 6l4 8 4-8 5 12 M3 18h18",
-        _ => "M4 4h16v16H4z",
-    };
-
     let stroke = format!(
         "#{:02X}{:02X}{:02X}",
         (color.r * 255.0) as u8,
         (color.g * 255.0) as u8,
         (color.b * 255.0) as u8,
     );
-    let markup = format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{stroke}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="{path}"/></svg>"#
-    );
+
+    let markup = match name {
+        "diamond" => format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                <defs>
+                    <linearGradient id="crystal" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0" stop-color="#B8FAFF"/>
+                        <stop offset="0.48" stop-color="#43D6F2"/>
+                        <stop offset="1" stop-color="#2378D8"/>
+                    </linearGradient>
+                </defs>
+                <path d="M12 1.8 21 7v10l-9 5.2L3 17V7l9-5.2Z" fill="url(#crystal)" stroke="{stroke}" stroke-width="1.2"/>
+                <path d="m3 7 9 5.2L21 7M12 12.2v10M7.5 4.4 12 12.2l4.5-7.8" fill="none" stroke="#E8FDFF" stroke-width="1.05" stroke-linejoin="round" opacity=".9"/>
+            </svg>"##
+        ),
+        "minecraft" => format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                <path d="m12 1.8 10 5.6-10 5.7L2 7.4 12 1.8Z" fill="#63B94A" stroke="{stroke}" stroke-width="1.1" stroke-linejoin="round"/>
+                <path d="M2 7.4 12 13.1v9L2 16.5V7.4Z" fill="#95602F" stroke="{stroke}" stroke-width="1.1" stroke-linejoin="round"/>
+                <path d="m22 7.4-10 5.7v9l10-5.6V7.4Z" fill="#67401F" stroke="{stroke}" stroke-width="1.1" stroke-linejoin="round"/>
+                <path d="m2 7.4 3.1 1.8 2.2-1.1 2.3 1.3 2.4-1.2v4.9L2 7.4Z" fill="#8CD65A" opacity=".9"/>
+                <path d="m12 13.1 10-5.7M12 13.1v9" fill="none" stroke="#D6F3C0" stroke-width=".7" opacity=".65"/>
+            </svg>"##
+        ),
+        _ => {
+            let path = match name {
+                "home" => "M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3V10.5Z",
+                "instances" => "M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z",
+                "puzzle" => "M8 4a2 2 0 1 1 4 0v2h4v4h2a2 2 0 1 1 0 4h-2v4h-4v-2a2 2 0 1 0-4 0v2H4v-4h2a2 2 0 1 0 0-4H4V6h4V4Z",
+                "package" => "m12 3 9 5v8l-9 5-9-5V8l9-5Z M3 8l9 5 9-5 M12 13v8 M7.5 5.5l9 5",
+                "download" => "M12 3v12m0 0 4-4m-4 4-4-4 M4 18v3h16v-3",
+                "user" => "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M4 21a8 8 0 0 1 16 0",
+                "settings" => "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 3.1-.2-.1a1.7 1.7 0 0 0-1.9.2l-.1.1h-3.6l-.1-.2a1.7 1.7 0 0 0-1.6-1 1.7 1.7 0 0 0-1.1.4l-.2.1-3.1-1.8.1-.2a1.7 1.7 0 0 0-.2-1.9l-.1-.1v-3.6l.2-.1a1.7 1.7 0 0 0 .6-2.7l-.1-.2 1.8-3.1.2.1a1.7 1.7 0 0 0 1.9-.2l.1-.1h3.6l.1.2a1.7 1.7 0 0 0 2.7.6l.2-.1 3.1 1.8-.1.2a1.7 1.7 0 0 0 .2 1.9l.1.1V15Z",
+                "search" => "M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15Z M16 16l5 5",
+                "community" => "M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2 M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M20 8v6 M17 11h6",
+                "discord" => "M7 7c3-2 7-2 10 0l2 10c-3 2-11 2-14 0L7 7Z M9 12h.01 M15 12h.01 M8 8 6 5 M16 8l2-3",
+                "globe" => "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z M2 12h20 M12 2a15 15 0 0 1 0 20 M12 2a15 15 0 0 0 0 20",
+                "chevron-down" => "m6 9 6 6 6-6",
+                "chevron-right" => "m9 18 6-6-6-6",
+                "arrow-right" => "M4 12h16 M13 5l7 7-7 7",
+                "play" => "m8 5 12 7-12 7V5Z",
+                "plus" => "M12 4v16 M4 12h16",
+                "trash" => "M4 7h16 M10 11v6 M14 11v6 M6 7l1 14h10l1-14 M9 7V4h6v3",
+                "check" => "m5 12 4 4L19 6",
+                "shield" => "M12 3 20 6v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-3Z M9 12l2 2 4-4",
+                "microsoft" => "M3 3h8v8H3z M13 3h8v8h-8z M3 13h8v8H3z M13 13h8v8h-8z",
+                "loader" => "M20 12a8 8 0 1 1-2.3-5.7",
+                "java" => "M6 3c-2 4 3 5 0 9 M12 2c-2 4 3 6 0 10 M18 3c-2 4 3 5 0 9 M5 15h14l-2 5H7l-2-5Z M3 22h18",
+                "forge" | "curseforge" => "M12 2c3 4-2 6 1 9 2-2 4-3 4-6 4 5 5 10 1 14-4 4-11 3-13-2-2-4 0-9 4-12 0 4 1 5 3 6 1-3-1-5 0-9Z",
+                "horizon" => "M3 18 8 6l4 8 4-8 5 12 M3 18h18",
+                "modrinth" => "M12 2 22 12 12 22 2 12 12 2Z M12 6 18 12 12 18 6 12 12 6Z",
+                _ => "M4 4h16v16H4z",
+            };
+            format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{stroke}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="{path}"/></svg>"##
+            )
+        }
+    };
 
     svg::Svg::new(svg::Handle::from_memory(markup.into_bytes()))
         .width(size)
