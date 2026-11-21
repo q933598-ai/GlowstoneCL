@@ -1331,7 +1331,13 @@ fn sidebar(app: &App) -> Element<'_, Message> {
     )
     .padding(10)
     .width(Length::Fill)
-    .style(|_| glass_style(PANEL_LIGHT, EDGE))
+    .style(|theme, status| {
+        let mut style = button::text(theme, status);
+        style.background = Some(PANEL_LIGHT.into());
+        style.text_color = TEXT;
+        style.border = Border::default().rounded(12).width(1).color(EDGE);
+        style
+    })
     .on_press(Message::Navigate(Page::Accounts));
 
     container(
