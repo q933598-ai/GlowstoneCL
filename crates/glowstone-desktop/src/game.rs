@@ -420,7 +420,7 @@ async fn ensure_horizon_build(
         .bytes()
         .await
         .map_err(|error| format!("Не удалось прочитать архив Horizon: {error}"))?;
-    let actual_sha256 = format!("{:x}", sha2::Sha256::digest(&archive));
+    let actual_sha256 = digest_hex(sha2::Sha256::digest(&archive));
     if actual_sha256 != expected_sha256 {
         return Err("SHA-256 архива Horizon не совпадает с подписанным SHA256SUMS.".to_owned());
     }
@@ -432,7 +432,7 @@ async fn ensure_horizon_build(
         return Err("GitHub вернул некорректное имя версии Horizon.".to_owned());
     }
 
-    let archive_path = horizon_archive_cache_path(versions_dir, &version, asset_name)?;
+    let archive_path = horizon_archive_cache_path(&versions_dir, &version, asset_name)?;
     tokio::fs::write(&archive_path, &archive)
         .await
         .map_err(|error| format!("Не удалось сохранить архив Horizon: {error}"))?;
@@ -567,6 +567,14 @@ fn verify_horizon_signature(tag: &str, sums: &[u8], signatures: &str) -> Result<
         }
     }
     Err("Подпись Horizon не прошла проверку Ed25519; архив не будет установлен.".to_owned())
+}
+
+fn digest_hex(bytes: impl AsRef<[u8]>) -> String {
+    let mut result = String::with_capacity(bytes.as_ref().len() * 2);
+    for byte in bytes.as_ref() {
+        result.push_str(&format!("{byte:02x}"));
+    }
+    result
 }
 
 fn expected_sha256(sums: &[u8], asset_name: &str) -> Result<String, String> {
@@ -825,7 +833,7 @@ async fn ensure_server_jar(
         .join("server-jars")
         .join(format!("{version_id}.jar"));
     if let Ok(existing) = tokio::fs::read(&target).await {
-        if format!("{:x}", sha1::Sha1::digest(&existing)) == expected_sha1 {
+        if digest_hex(sha1::Sha1::digest(&existing)) == expected_sha1 {
             return Ok(target);
         }
     }
@@ -840,7 +848,7 @@ async fn ensure_server_jar(
         .bytes()
         .await
         .map_err(|error| format!("Не удалось прочитать Minecraft server.jar: {error}"))?;
-    if format!("{:x}", sha1::Sha1::digest(&bytes)) != expected_sha1 {
+    if digest_hex(sha1::Sha1::digest(&bytes)) != expected_sha1 {
         return Err("SHA-1 Minecraft server.jar не совпадает с Mojang metadata.".to_owned());
     }
     if let Some(parent) = target.parent() {
@@ -935,6 +943,11 @@ async fn launch_horizon_client(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn digest_hex_encodes_sha_bytes_as_lowercase_hex() {
+        assert_eq!(digest_hex([0x00_u8, 0x0f, 0xa5, 0xff]), "000fa5ff");
+    }
 
     #[test]
     fn maps_java_release_aliases_to_crust_core_selectors() {
