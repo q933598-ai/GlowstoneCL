@@ -785,7 +785,7 @@ fn platform_card(art: image::Handle, platform: PlatformChoice, selected: bool) -
             Color::from_rgba(0.035, 0.19, 0.09, 0.64),
             GREEN,
             ["Forge", "Fabric", "NeoForge", "Quilt"],
-            Rectangle { x: 0, y: 115, width: 700, height: 255 },
+            Rectangle::<u32> { x: 0, y: 115, width: 700, height: 255 },
         ),
         PlatformChoice::Horizon => (
             "Minecraft Horizon",
@@ -794,7 +794,7 @@ fn platform_card(art: image::Handle, platform: PlatformChoice, selected: bool) -
             Color::from_rgba(0.23, 0.10, 0.045, 0.66),
             ORANGE,
             ["HMOD", "HNMOD", "Content", "Native"],
-            Rectangle { x: 190, y: 80, width: 510, height: 270 },
+            Rectangle::<u32> { x: 190, y: 80, width: 510, height: 270 },
         ),
     };
 
@@ -884,10 +884,10 @@ fn pack_card(
     index: usize,
 ) -> Element<'static, Message> {
     let crops = [
-        Rectangle { x: 0, y: 20, width: 300, height: 220 },
-        Rectangle { x: 220, y: 0, width: 320, height: 240 },
-        Rectangle { x: 360, y: 60, width: 330, height: 220 },
-        Rectangle { x: 80, y: 160, width: 400, height: 210 },
+        Rectangle::<u32> { x: 0, y: 20, width: 300, height: 220 },
+        Rectangle::<u32> { x: 220, y: 0, width: 320, height: 240 },
+        Rectangle::<u32> { x: 360, y: 60, width: 330, height: 220 },
+        Rectangle::<u32> { x: 80, y: 160, width: 400, height: 210 },
     ];
     let crop = crops[index.min(3)];
 
