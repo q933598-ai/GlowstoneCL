@@ -83,12 +83,13 @@ The desktop crate currently contains the runtime integrations:
 
 - `auth.rs` — Microsoft browser Device Code Flow through CrustCore, profile checks and CrustCore account construction;
 - `game.rs` — CrustCore Java installer/launcher, signed official Horizon release selection, and separate Horizon Offline fork integration;
-- `store.rs` — instance metadata, per-instance workspaces, OS credential storage, and per-offline-UUID skin collections;
-- `ui.rs` — desktop controls for authentication, launching, and the local offline-skin wardrobe.
+- `store.rs` — instance metadata, per-instance workspaces, OS credential storage, and per-account skin collections;
+- `skin_preview.rs` — textured 3D player preview built from the Minecraft skin atlas on Iced Canvas;
+- `ui.rs` — desktop controls for authentication, launching, and the multi-account skin wardrobe.
 
-## Local offline-skin wardrobe
+## Skin wardrobe
 
-Skin files are stored under `skins/<offline-uuid>/` in the GlowstoneCL data directory, with a per-profile `skins.json` collection. Import validates PNG decoding, a 2 MiB file limit, and Minecraft skin dimensions (64×64 or legacy 64×32). The launcher supports local selection, rename, deletion, and a 2D texture-atlas preview. The selected texture is not currently injected into the Minecraft client; in-game rendering and a 3D player preview remain separate future work. Microsoft profiles are not modified.
+Skin files are stored under `skins/<profile-uuid>/` in the GlowstoneCL data directory, with a per-profile `skins.json` collection. Import validates PNG decoding, a 2 MiB file limit, and Minecraft skin dimensions (64×64 or legacy 64×32). The desktop renders the selected texture on a rotatable 3D player model assembled from the skin atlas. For Microsoft accounts, the wardrobe can download the current active profile skin and upload a selected PNG to the authenticated Minecraft Services profile using the multipart `variant` and `file` fields. Refresh tokens remain in the OS credential store; short-lived access tokens are only held in memory. For offline profiles, the wardrobe is local-only: an unmodified Vanilla client does not read these local PNG files, so in-game use requires a compatible client-side skin mod.
 
 The following integrations remain future work:
 
