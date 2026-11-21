@@ -1899,7 +1899,7 @@ fn right_rail(app: &App) -> Element<'_, Message> {
     ]
     .spacing(10);
     for (index, entry) in entries.iter().take(3).enumerate() {
-        news_content = news_content.push(news_item(index, entry));
+        news_content = news_content.push(news_item(index, *entry));
     }
     let news = container(news_content)
         .padding(13)
@@ -2028,7 +2028,7 @@ fn news_entries() -> [NewsEntry; 4] {
     ]
 }
 
-fn news_item(index: usize, entry: &NewsEntry) -> Element<'static, Message> {
+fn news_item(index: usize, entry: NewsEntry) -> Element<'static, Message> {
     button(
         row![
             container(icon(entry.icon, entry.accent, 17.0))
@@ -2149,6 +2149,7 @@ fn news_page(app: &App) -> Element<'_, Message> {
     .spacing(12)
     .width(Length::Fill);
     for (index, entry) in entries.iter().enumerate() {
+        let entry = *entry;
         list = list.push(
             button(
                 row![
