@@ -1,4 +1,3 @@
-use glowstone_core::GamePlatform;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -92,7 +91,10 @@ pub async fn request_device_code(client_id: String) -> Result<DeviceCodePrompt, 
 pub async fn poll_device_code(
     client_id: String,
     device_code: String,
+    interval: u64,
 ) -> Result<PollResult, String> {
+    tokio::time::sleep(std::time::Duration::from_secs(interval.max(5))).await;
+
     let response = reqwest::Client::new()
         .post(TOKEN_ENDPOINT)
         .form(&[
@@ -288,8 +290,6 @@ async fn authenticate_minecraft(microsoft_access_token: &str) -> Result<AccountP
     let canonical_uuid = uuid::Uuid::parse_str(uuid)
         .map(|value| value.to_string())
         .unwrap_or_else(|_| uuid.to_owned());
-
-    let _ = GamePlatform::Java;
 
     Ok(AccountProfile {
         id: format!("microsoft:{canonical_uuid}"),
