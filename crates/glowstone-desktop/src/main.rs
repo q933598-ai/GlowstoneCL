@@ -10,7 +10,7 @@ fn main() -> iced::Result {
     iced::application(ui::App::default, ui::update, ui::view)
         .title("GlowstoneCL")
         .theme(iced::Theme::Dark)
-        .default_font(iced::Font::with_name("Noto Sans"))
+        .default_font(default_font())
         .window_size(iced::Size::new(1600.0, 900.0))
         .centered()
         .run()
@@ -45,3 +45,21 @@ fn apply_linux_backend_override() {
 
 #[cfg(not(target_os = "linux"))]
 fn apply_linux_backend_override() {}
+
+
+fn default_font() -> iced::Font {
+    #[cfg(target_os = "linux")]
+    {
+        iced::Font::with_name("Inter")
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        iced::Font::with_name("Segoe UI")
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        iced::Font::with_name("Arial")
+    }
+}
