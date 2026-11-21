@@ -216,6 +216,43 @@ impl Default for App {
     }
 }
 
+
+fn supports_mod_catalog(instance: &GameInstance) -> bool {
+    match instance.platform {
+        GamePlatform::Java => !matches!(instance.loader, LoaderKind::Vanilla),
+        GamePlatform::Horizon | GamePlatform::HorizonOffline => true,
+    }
+}
+
+fn start_catalog_search(app: &mut App, instance: GameInstance) -> iced::Task<Message> {
+    let target_id = instance.id.0.clone();
+    app.mod_target_instance = Some(target_id.clone());
+    app.mods_busy = true;
+    app.mods_busy_project = None;
+    app.mods_error = None;
+    app.mod_results.clear();
+    app.horizon_mod_results.clear();
+
+    match instance.platform {
+        GamePlatform::Java => {
+            app.horizon_installed_mods.clear();
+            app.installed_mods = mods::installed(&target_id).unwrap_or_default();
+            iced::Task::perform(
+                mods::search(instance, app.search.clone()),
+                move |result| Message::ModsSearched(target_id, result),
+            )
+        }
+        GamePlatform::Horizon | GamePlatform::HorizonOffline => {
+            app.installed_mods.clear();
+            app.horizon_installed_mods = horizon_mods::installed(&target_id).unwrap_or_default();
+            iced::Task::perform(
+                horizon_mods::search(instance, app.search.clone()),
+                move |result| Message::HorizonModsSearched(target_id, result),
+            )
+        }
+    }
+}
+
 pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
     match message {
         Message::Navigate(page) => {
@@ -247,27 +284,15 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             if page == Page::Catalog {
                 let selected = app.data.settings.selected_instance_id.as_deref()
                     .and_then(|id| app.data.instances.iter().find(|item| item.id.0 == id))
-                    .filter(|item| item.platform == GamePlatform::Java && !matches!(item.loader, LoaderKind::Vanilla))
+                    .filter(|item| supports_mod_catalog(item))
                     .cloned()
-                    .or_else(|| app.data.instances.iter()
-                        .find(|item| item.platform == GamePlatform::Java && !matches!(item.loader, LoaderKind::Vanilla))
-                        .cloned());
-                app.mod_target_instance = selected.as_ref().map(|item| item.id.0.clone());
-                app.mods_busy_project = None;
-                app.mod_results.clear();
-                app.mods_error = None;
-                app.installed_mods = selected.as_ref()
-                    .and_then(|item| mods::installed(&item.id.0).ok())
-                    .unwrap_or_default();
+                    .or_else(|| app.data.instances.iter().find(|item| supports_mod_catalog(item)).cloned());
                 if let Some(instance) = selected {
-                    let target_id = instance.id.0.clone();
-                    app.mods_busy = true;
-                    return iced::Task::perform(
-                        mods::search(instance, app.search.clone()),
-                        move |result| Message::ModsSearched(target_id, result),
-                    );
+                    return start_catalog_search(app, instance);
                 }
-                app.mods_error = Some("Сначала создай сборку Minecraft Java с Fabric, Forge, NeoForge или Quilt.".to_owned());
+                app.mod_target_instance = None;
+                app.mods_busy = false;
+                app.mods_error = Some("Сначала создай Java-сборку с мод-загрузчиком или Horizon-сборку.".to_owned());
             }
         }
         Message::SelectPlatform(platform) => {
@@ -312,40 +337,40 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         }
         Message::SearchMods => {
             let Some(target_id) = app.mod_target_instance.clone() else {
-                app.mods_error = Some("Сначала выбери сборку Minecraft Java с мод-загрузчиком.".to_owned());
+                app.mods_error = Some("Сначала выбери сборку с поддержкой модов.".to_owned());
                 return iced::Task::none();
             };
-            let Some(instance) = app.data.instances.iter().find(|item| item.id.0 == target_id).cloned() else {
-                app.mods_error = Some("Выбранная сборка больше не существует.".to_owned());
+            let Some(instance) = app.data.instances.iter()
+                .find(|item| item.id.0 == target_id && supports_mod_catalog(item))
+                .cloned()
+            else {
+                app.mods_error = Some("Выбранная сборка не поддерживает установку модов.".to_owned());
                 return iced::Task::none();
             };
-            app.mods_busy = true;
             app.mods_error = None;
-            return iced::Task::perform(
-                mods::search(instance, app.search.clone()),
-                move |result| Message::ModsSearched(target_id, result),
-            );
+            return start_catalog_search(app, instance);
         }
         Message::ModTargetSelected(target_id) => {
             let Some(instance) = app.data.instances.iter()
-                .find(|item| item.id.0 == target_id
-                    && item.platform == GamePlatform::Java
-                    && !matches!(item.loader, LoaderKind::Vanilla))
+                .find(|item| item.id.0 == target_id && supports_mod_catalog(item))
                 .cloned()
             else {
-                app.mods_error = Some("Нужна Java-сборка с Fabric, Forge, NeoForge или Quilt.".to_owned());
+                app.mods_error = Some("Vanilla не поддерживает установку модов. Выбери Java-сборку с загрузчиком или Horizon.".to_owned());
                 return iced::Task::none();
             };
-            app.mod_target_instance = Some(target_id.clone());
-            app.mods_busy_project = None;
-            app.installed_mods = mods::installed(&target_id).unwrap_or_default();
-            app.mod_results.clear();
-            app.mods_busy = true;
-            app.mods_error = None;
-            return iced::Task::perform(
-                mods::search(instance, app.search.clone()),
-                move |result| Message::ModsSearched(target_id, result),
-            );
+            return start_catalog_search(app, instance);
+        }
+        Message::OpenInstanceMods(target_id) => {
+            let Some(instance) = app.data.instances.iter()
+                .find(|item| item.id.0 == target_id && supports_mod_catalog(item))
+                .cloned()
+            else {
+                app.notice = Some("Для Vanilla установка модов недоступна. Выбери Fabric, Forge, NeoForge, Quilt или Horizon.".to_owned());
+                return iced::Task::none();
+            };
+            app.page = Page::Catalog;
+            app.notice = None;
+            return start_catalog_search(app, instance);
         }
         Message::ModsSearched(target_id, result) => {
             if app.mod_target_instance.as_deref() == Some(target_id.as_str()) {
@@ -407,6 +432,55 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     Ok(installed) => {
                         app.installed_mods = installed;
                         app.notice = Some("Мод удалён из этой сборки.".to_owned());
+                    }
+                    Err(error) => app.notice = Some(error),
+                }
+            }
+        }
+        Message::InstallHorizonMod(project_id) => {
+            if app.mods_busy {
+                app.notice = Some("Дождись завершения текущего поиска или установки.".to_owned());
+                return iced::Task::none();
+            }
+            let Some(target_id) = app.mod_target_instance.clone() else {
+                app.notice = Some("Сначала выбери Horizon-сборку.".to_owned());
+                return iced::Task::none();
+            };
+            let Some(instance) = app.data.instances.iter()
+                .find(|item| item.id.0 == target_id
+                    && matches!(item.platform, GamePlatform::Horizon | GamePlatform::HorizonOffline))
+                .cloned()
+            else {
+                app.notice = Some("Выбранная сборка не является Horizon.".to_owned());
+                return iced::Task::none();
+            };
+            app.mods_busy = true;
+            app.mods_busy_project = Some(project_id.clone());
+            app.notice = Some("Скачиваю HMOD и проверяю SHA-256 по реестру Horizon…".to_owned());
+            return iced::Task::perform(
+                horizon_mods::install(instance, project_id),
+                move |result| Message::HorizonModInstallFinished(target_id, result),
+            );
+        }
+        Message::HorizonModInstallFinished(target_id, result) => {
+            if app.mod_target_instance.as_deref() == Some(target_id.as_str()) {
+                app.mods_busy = false;
+                app.mods_busy_project = None;
+                match result {
+                    Ok(installed) => {
+                        app.horizon_installed_mods = installed;
+                        app.notice = Some("Horizon-мод установлен и включён. Перезапусти игру, чтобы он загрузился.".to_owned());
+                    }
+                    Err(error) => app.notice = Some(error),
+                }
+            }
+        }
+        Message::RemoveHorizonMod(target_id, project_id) => {
+            if app.mod_target_instance.as_deref() == Some(target_id.as_str()) {
+                match horizon_mods::remove(&target_id, &project_id) {
+                    Ok(installed) => {
+                        app.horizon_installed_mods = installed;
+                        app.notice = Some("Horizon-мод удалён из этой сборки.".to_owned());
                     }
                     Err(error) => app.notice = Some(error),
                 }
