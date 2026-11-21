@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use iced::widget::{
     button, canvas, column, container, image, row, rule, scrollable, stack, svg, text,
     text_input, Space,
@@ -165,6 +167,7 @@ pub struct App {
     rename_skin_name: String,
     skin_model: store::SkinModel,
     wardrobe_preview: Option<std::sync::Arc<Vec<[u8; 4]>>>,
+    wardrobe_skin_previews: HashMap<String, std::sync::Arc<Vec<[u8; 4]>>>,
     wardrobe_angle: f32,
     recent_plays: Vec<store::RecentPlay>,
     selected_news: Option<usize>,
@@ -183,6 +186,16 @@ impl Default for App {
             .unwrap_or_default();
         let wardrobe_selected_skin_id = wardrobe_collection.active_skin_id.clone()
             .or_else(|| wardrobe_collection.skins.first().map(|skin| skin.id.clone()));
+        let wardrobe_skin_previews = wardrobe_account_id.as_ref()
+            .and_then(|id| data.accounts.iter().find(|account| &account.id == id))
+            .map(|account| {
+                wardrobe_collection.skins.iter()
+                    .filter_map(|skin| store::load_skin_pixels(&account.uuid, &skin.id)
+                        .ok()
+                        .map(|texture| (skin.id.clone(), texture)))
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
         Self {
             page: Page::Home,
             platform: PlatformChoice::Java,
@@ -217,7 +230,9 @@ impl Default for App {
             skin_name: String::new(),
             rename_skin_name: String::new(),
             skin_model: store::SkinModel::Classic,
-            wardrobe_preview: None,
+            wardrobe_preview: wardrobe_selected_skin_id.as_ref()
+                .and_then(|id| wardrobe_skin_previews.get(id).cloned()),
+            wardrobe_skin_previews,
             wardrobe_angle: 0.0,
             recent_plays: store::load_recent_plays(),
             selected_news: None,
@@ -2580,10 +2595,20 @@ fn ensure_wardrobe_account(app: &mut App) {
 }
 
 fn refresh_skin_preview(app: &mut App) {
-    app.wardrobe_preview = wardrobe_account(app)
-        .and_then(|account| app.wardrobe_selected_skin_id.as_deref()
-            .map(|id| (account.uuid.clone(), id.to_owned())))
-        .and_then(|(uuid, id)| store::load_skin_pixels(&uuid, &id).ok());
+    app.wardrobe_preview = app.wardrobe_selected_skin_id.as_ref()
+        .and_then(|id| app.wardrobe_skin_previews.get(id).cloned());
+}
+
+fn refresh_skin_preview_cache(app: &mut App) {
+    app.wardrobe_skin_previews.clear();
+    if let Some(account) = wardrobe_account(app) {
+        for skin in &app.wardrobe_skins {
+            if let Ok(texture) = store::load_skin_pixels(&account.uuid, &skin.id) {
+                app.wardrobe_skin_previews.insert(skin.id.clone(), texture);
+            }
+        }
+    }
+    refresh_skin_preview(app);
 }
 
 fn refresh_wardrobe(app: &mut App) {
@@ -2593,6 +2618,7 @@ fn refresh_wardrobe(app: &mut App) {
         app.wardrobe_selected_skin_id = None;
         app.rename_skin_name.clear();
         app.wardrobe_preview = None;
+        app.wardrobe_skin_previews.clear();
         return;
     };
     match store::load_skin_collection(&account.uuid) {
@@ -2609,10 +2635,11 @@ fn refresh_wardrobe(app: &mut App) {
                 .and_then(|id| app.wardrobe_skins.iter().find(|skin| &skin.id == id))
                 .map(|skin| skin.name.clone())
                 .unwrap_or_default();
-            refresh_skin_preview(app);
+            refresh_skin_preview_cache(app);
         }
         Err(error) => {
             app.wardrobe_preview = None;
+            app.wardrobe_skin_previews.clear();
             app.notice = Some(error);
         }
     }
@@ -2719,7 +2746,7 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
         container(
             column![
                 row![
-                    text("3D-ПРЕДПРОСМОТР").size(9).color(CYAN),
+                    text("3D-ПРЕДПРОСМОТР · ПОТЯНИ ЛКМ, ЧТОБЫ ВРАЩАТЬ").size(9).color(CYAN),
                     Space::new().width(Length::Fill),
                     text(skin.model.label()).size(9).color(MUTED),
                 ].align_y(Alignment::Center),
@@ -2832,11 +2859,12 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
             let skin_id = skin.id.clone();
             let active = app.wardrobe_active_skin_id.as_deref() == Some(skin.id.as_str());
             let selected = app.wardrobe_selected_skin_id.as_deref() == Some(skin.id.as_str());
-            let preview = store::skin_image_path(&account_uuid, &skin.id).ok()
-                .map(|path| image::Image::new(image::Handle::from_path(path))
+            let preview = app.wardrobe_skin_previews.get(&skin.id).cloned()
+                .map(|texture| canvas::Canvas::new(crate::skin_preview::SkinPreview::new(
+                    texture, skin.model, 0.0,
+                ))
                     .width(Length::Fixed(76.0))
-                    .height(Length::Fixed(76.0))
-                    .content_fit(ContentFit::Contain));
+                    .height(Length::Fixed(76.0)));
             let preview_element: Element<'_, Message> = match preview {
                 Some(view) => view.into(),
                 None => icon("image", SUBTLE, 22.0),
