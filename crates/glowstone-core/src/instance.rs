@@ -40,6 +40,20 @@ impl GameInstance {
             });
         }
 
+        if let Some(version) = self.loader_version.as_deref() {
+            if version.is_empty()
+                || version.len() > 128
+                || !version.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'+')
+                })
+            {
+                return Err(InstanceValidationError::InvalidLoaderVersion);
+            }
+            if self.platform != GamePlatform::Java || self.loader == LoaderKind::Vanilla {
+                return Err(InstanceValidationError::LoaderVersionRequiresModdedJava);
+            }
+        }
+
         Ok(())
     }
 }
@@ -53,4 +67,8 @@ pub enum InstanceValidationError {
         platform: GamePlatform,
         loader: LoaderKind,
     },
+    #[error("Loader build identifier contains unsupported characters or is too long")]
+    InvalidLoaderVersion,
+    #[error("An exact loader build can only be pinned to a modded Java profile")]
+    LoaderVersionRequiresModdedJava,
 }
