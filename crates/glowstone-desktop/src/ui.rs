@@ -460,10 +460,6 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         }
         Message::SelectModSource(source) => {
             app.mod_source = source;
-            let compatible = match source {
-                ModSource::Horizon => |instance: &&GameInstance| matches!(instance.platform, GamePlatform::Horizon | GamePlatform::HorizonOffline),
-                ModSource::Modrinth | ModSource::CurseForge => |instance: &&GameInstance| instance.platform == GamePlatform::Java && !matches!(instance.loader, LoaderKind::Vanilla),
-            };
             let selected = app.mod_target_instance.as_deref()
                 .and_then(|id| app.data.instances.iter().find(|item| item.id.0 == id))
                 .filter(|item| match source {
@@ -3456,13 +3452,199 @@ fn mod_icon(bytes: Option<Vec<u8>>, fallback: String) -> Element<'static, Messag
 }
 
 fn catalog_page(app: &App) -> Element<'_, Message> {
+    let tabs = row![
+        source_tab("Horizon", app.mod_source == ModSource::Horizon, Message::SelectModSource(ModSource::Horizon)),
+        source_tab("Modrinth", app.mod_source == ModSource::Modrinth, Message::SelectModSource(ModSource::Modrinth)),
+        source_tab("CurseForge", app.mod_source == ModSource::CurseForge, Message::SelectModSource(ModSource::CurseForge)),
+    ]
+    .spacing(8);
+
+    let content: Element<'_, Message> = match app.mod_source {
+        ModSource::Horizon => horizon_catalog_page(app),
+        ModSource::Modrinth => java_catalog_page(app),
+        ModSource::CurseForge => curseforge_catalog_page(app),
+    };
+    column![tabs, content]
+        .spacing(12)
+        .width(Length::Fill)
+        .into()
+}
+
+fn source_tab(label: &'static str, active: bool, message: Message) -> Element<'static, Message> {
+    button(text(label).size(10).color(if active { TEXT } else { MUTED }))
+        .on_press(message)
+        .padding([9, 16])
+        .style(move |theme, status| {
+            let mut style = button::secondary(theme, status);
+            style.background = Some(if active {
+                Color::from_rgba(0.83, 0.90, 0.92, 0.94)
+            } else {
+                Color::from_rgba(1.0, 1.0, 1.0, 0.56)
+            }.into());
+            style.text_color = if active { TEXT } else { MUTED };
+            style.border = Border::default().rounded(12).width(1)
+                .color(if active { EDGE_BRIGHT } else { EDGE });
+            style
+        })
+        .into()
+}
+
+fn curseforge_catalog_page(app: &App) -> Element<'_, Message> {
     let selected = app.mod_target_instance.as_deref()
         .and_then(|id| app.data.instances.iter().find(|item| item.id.0 == id));
-    if selected.is_some_and(|instance| matches!(instance.platform, GamePlatform::Horizon | GamePlatform::HorizonOffline)) {
-        horizon_catalog_page(app)
-    } else {
-        java_catalog_page(app)
+    let mut targets = row![text("СБОРКА").size(9).color(MUTED)].spacing(7).align_y(Alignment::Center);
+    let mut target_count = 0usize;
+    for instance in app.data.instances.iter().filter(|item| {
+        item.platform == GamePlatform::Java && !matches!(item.loader, LoaderKind::Vanilla)
+    }) {
+        target_count += 1;
+        let active = app.mod_target_instance.as_deref() == Some(instance.id.0.as_str());
+        let label = format!("{} · {} · {}", instance.name, instance.game_version, loader_label(instance.loader));
+        targets = targets.push(
+            button(text(label).size(9).color(if active { CYAN } else { TEXT }))
+                .on_press(Message::ModTargetSelected(instance.id.0.clone()))
+                .padding([8, 11])
+                .style(move |theme, status| {
+                    let mut style = button::secondary(theme, status);
+                    style.background = Some(if active { CYAN_DARK } else { PANEL_LIGHT }.into());
+                    style.text_color = if active { CYAN } else { TEXT };
+                    style.border = Border::default().rounded(9).width(1)
+                        .color(if active { EDGE_BRIGHT } else { EDGE });
+                    style
+                })
+        );
     }
+    let current_profile = selected.map(|item| format!(
+        "{} · Minecraft {} · {}",
+        item.name, item.game_version, loader_label(item.loader)
+    )).unwrap_or_else(|| "Сборка не выбрана".to_owned());
+
+    let mut installed = column![].spacing(7);
+    if app.curseforge_installed_mods.is_empty() {
+        installed = installed.push(text("В этой сборке пока нет управляемых CurseForge-модов.").size(9).color(SUBTLE));
+    } else {
+        for item in &app.curseforge_installed_mods {
+            installed = installed.push(
+                container(
+                    row![
+                        mod_icon(None, item.name.clone()),
+                        column![
+                            text(item.name.clone()).size(10).color(TEXT),
+                            text(format!("{} · {}", item.version, item.file_name)).size(8).color(MUTED),
+                            text("CURSEFORGE").size(7).color(ORANGE),
+                        ].spacing(3),
+                        Space::new().width(Length::Fill),
+                        quiet_button("Удалить", Message::RemoveCurseForgeMod(
+                            app.mod_target_instance.clone().unwrap_or_default(),
+                            item.mod_id, item.file_id,
+                        )),
+                    ].align_y(Alignment::Center).spacing(8)
+                )
+                .padding(10)
+                .width(Length::Fill)
+                .style(|_| glass_style(PANEL_LIGHT, EDGE))
+            );
+        }
+    }
+
+    let mut results = column![].spacing(9);
+    for project in &app.curseforge_mod_results {
+        let installed_now = app.curseforge_installed_mods.iter()
+            .any(|item| item.mod_id == project.mod_id && Some(item.file_id) == project.file_id);
+        let action: Element<'_, Message> = if installed_now {
+            status_chip("УСТАНОВЛЕН", CYAN_DARK, CYAN)
+        } else if let Some(file_id) = project.file_id {
+            primary_button("Установить", Message::InstallCurseForgeMod(project.mod_id, file_id))
+        } else {
+            status_chip("НЕТ ФАЙЛА ДЛЯ ЭТОЙ ВЕРСИИ", PANEL_LIGHT, MUTED)
+        };
+        results = results.push(
+            container(
+                row![
+                    mod_icon(None, project.name.clone()),
+                    column![
+                        text(project.name.clone()).size(12).color(TEXT),
+                        text(format!("{} загрузок · {}", format_downloads(project.downloads),
+                            project.version.clone().unwrap_or_else(|| "нет совместимого файла".to_owned())))
+                            .size(8).color(ORANGE),
+                        text(project.summary.clone()).size(9).color(MUTED),
+                    ].spacing(5).width(Length::Fill),
+                    action,
+                ].align_y(Alignment::Center).spacing(12)
+            )
+            .padding(13)
+            .width(Length::Fill)
+            .style(|_| glass_style(PANEL, EDGE))
+        );
+    }
+
+    let mut content = column![
+        section_header("CURSEFORGE · MODS", "Официальный API CurseForge · совместимость с выбранной версией и загрузчиком."),
+        container(
+            column![
+                row![
+                    text_input("Поиск CurseForge-модов…", &app.search)
+                        .on_input(Message::SearchChanged)
+                        .on_submit(Message::SearchCurseForge)
+                        .padding(10)
+                        .size(10)
+                        .width(Length::Fill),
+                    primary_button("Найти", Message::SearchCurseForge),
+                ].spacing(8),
+                targets,
+                text(format!("Целевая сборка: {current_profile}")).size(9).color(MUTED),
+                text(if app.curseforge_api_key_configured {
+                    "API key сохранён в системном хранилище. JAR загружается через Download URL API и проверяется по SHA-1."
+                } else {
+                    "Для поиска CurseForge нужен API key. Добавь его в Настройки — он не сохраняется в state.json."
+                }).size(8).color(SUBTLE),
+            ].spacing(9)
+        )
+        .padding(14)
+        .width(Length::Fill)
+        .style(|_| glass_style(PANEL, EDGE)),
+    ].spacing(12).width(Length::Fill);
+
+    if target_count == 0 {
+        content = content.push(text("Создай Java-сборку с Fabric, Forge, NeoForge или Quilt.").size(10).color(MUTED));
+    } else {
+        content = content.push(
+            column![
+                row![
+                    text("УСТАНОВЛЕННЫЕ CURSEFORGE-МОДЫ").size(9).color(ORANGE),
+                    Space::new().width(Length::Fill),
+                    text(format!("{}", app.curseforge_installed_mods.len())).size(9).color(MUTED),
+                ].align_y(Alignment::Center),
+                installed,
+            ].spacing(8)
+        );
+        content = content.push(
+            row![
+                text("РЕЗУЛЬТАТЫ CURSEFORGE").size(9).color(ORANGE),
+                Space::new().width(Length::Fill),
+                quiet_button("Обновить", Message::SearchCurseForge),
+            ].align_y(Alignment::Center)
+        );
+        if app.mods_busy {
+            content = content.push(text("Обращаюсь к CurseForge API…").size(9).color(MUTED));
+        }
+        if let Some(error) = &app.mods_error {
+            content = content.push(container(text(error.clone()).size(9).color(ORANGE))
+                .padding(11).width(Length::Fill)
+                .style(|_| glass_style(PANEL, EDGE)));
+        }
+        if app.curseforge_mod_results.is_empty() && !app.mods_busy && app.mods_error.is_none() {
+            content = content.push(text("Нет результатов. Уточни запрос или проверь API key.").size(9).color(MUTED));
+        }
+        content = content.push(results);
+    }
+
+    if let Some(notice) = &app.notice {
+        content = content.push(container(text(notice.clone()).size(9).color(TEXT))
+            .padding(10).width(Length::Fill)
+            .style(|_| glass_style(CYAN_DARK, EDGE_BRIGHT)));
+    }
+    content.into()
 }
 
 fn horizon_catalog_page(app: &App) -> Element<'_, Message> {
