@@ -614,6 +614,9 @@ async fn launch_java(
     }
     options.instance = Some(instance.id.0.clone());
     options.loader.path = format!("instances/{}/loader", instance.id.0);
+    if let Some(loader_version) = instance.loader_version.as_deref() {
+        options.loader.build = loader_version.to_owned();
+    }
     options.download_concurrency = 10;
     options.memory.max = "4G".to_owned();
 
