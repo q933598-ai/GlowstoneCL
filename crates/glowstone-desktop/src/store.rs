@@ -1,5 +1,4 @@
 use std::fs;
-use std::io;
 use std::path::PathBuf;
 
 use directories::BaseDirs;
@@ -149,10 +148,6 @@ pub fn remove_refresh_token(account_id: &str) {
     if let Ok(entry) = keyring::Entry::new("GlowstoneCL", account_id) {
         let _ = entry.delete_credential();
     }
-}
-
-pub fn _io_error(error: io::Error) -> String {
-    error.to_string()
 }
 
 #[cfg(test)]
