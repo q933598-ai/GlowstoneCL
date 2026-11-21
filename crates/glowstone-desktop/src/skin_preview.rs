@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use iced::widget::canvas;
-use iced::{Color, Point, Rectangle};
+use iced::{mouse, Color, Point, Rectangle};
 
 use crate::store::SkinModel;
 
@@ -42,12 +42,69 @@ struct CubeUv {
     bottom: (u32, u32),
 }
 
+#[derive(Debug, Default)]
+struct PreviewInteraction {
+    dragging: bool,
+    last_x: f32,
+    rotation: f32,
+}
+
 impl<Message> canvas::Program<Message> for SkinPreview {
-    type State = ();
+    type State = PreviewInteraction;
+
+    fn update(
+        &self,
+        state: &mut Self::State,
+        event: &canvas::Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<Message>> {
+        match event {
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                let position = cursor.position_in(bounds)?;
+                state.dragging = true;
+                state.last_x = position.x;
+                Some(canvas::Action::request_redraw().and_capture())
+            }
+            canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) if state.dragging => {
+                if let Some(position) = cursor.position_in(bounds) {
+                    let delta = position.x - state.last_x;
+                    state.rotation = (state.rotation + delta * 0.014)
+                        .rem_euclid(std::f32::consts::TAU);
+                    state.last_x = position.x;
+                    Some(canvas::Action::request_redraw().and_capture())
+                } else {
+                    None
+                }
+            }
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if state.dragging {
+                    state.dragging = false;
+                    Some(canvas::Action::request_redraw().and_capture())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        state: &Self::State,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        if state.dragging {
+            mouse::Interaction::Grabbing
+        } else {
+            mouse::Interaction::Grab
+        }
+    }
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &iced::Renderer,
         _theme: &iced::Theme,
         bounds: Rectangle,
@@ -55,7 +112,7 @@ impl<Message> canvas::Program<Message> for SkinPreview {
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let background = canvas::Path::rectangle(Point::ORIGIN, bounds.size());
-        frame.fill(&background, Color::from_rgb8(17, 25, 41));
+        frame.fill(&background, Color::from_rgb8(233, 237, 241));
 
         if self.texture.len() < 64 * 32 {
             return vec![frame.into_geometry()];
@@ -66,7 +123,7 @@ impl<Message> canvas::Program<Message> for SkinPreview {
         let (width, height) = (bounds.width, bounds.height);
         let scale = (width / 23.0).min(height / 36.0) * 0.88;
         let center = Point::new(width * 0.5, height * 0.88);
-        let yaw = 0.58 + self.angle;
+        let yaw = 0.58 + self.angle + state.rotation;
 
         let head_uv = CubeUv {
             front: (8, 8), back: (24, 8), right: (0, 8), left: (16, 8),
