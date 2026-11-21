@@ -326,13 +326,22 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             if app.mod_target_instance.is_none() {
                 let selected = app.data.settings.selected_instance_id.as_deref()
                     .and_then(|id| app.data.instances.iter().find(|item| item.id.0 == id))
-                    .filter(|item| item.platform == GamePlatform::Java && !matches!(item.loader, LoaderKind::Vanilla))
-                    .or_else(|| app.data.instances.iter()
-                        .find(|item| item.platform == GamePlatform::Java && !matches!(item.loader, LoaderKind::Vanilla)));
-                app.mod_target_instance = selected.map(|item| item.id.0.clone());
-                app.installed_mods = app.mod_target_instance.as_deref()
-                    .and_then(|id| mods::installed(id).ok())
-                    .unwrap_or_default();
+                    .filter(|item| supports_mod_catalog(item))
+                    .cloned()
+                    .or_else(|| app.data.instances.iter().find(|item| supports_mod_catalog(item)).cloned());
+                if let Some(instance) = selected {
+                    app.mod_target_instance = Some(instance.id.0.clone());
+                    match instance.platform {
+                        GamePlatform::Java => {
+                            app.installed_mods = mods::installed(&instance.id.0).unwrap_or_default();
+                            app.horizon_installed_mods.clear();
+                        }
+                        GamePlatform::Horizon | GamePlatform::HorizonOffline => {
+                            app.horizon_installed_mods = horizon_mods::installed(&instance.id.0).unwrap_or_default();
+                            app.installed_mods.clear();
+                        }
+                    }
+                }
             }
         }
         Message::SearchMods => {
@@ -382,6 +391,21 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     }
                     Err(error) => {
                         app.mod_results.clear();
+                        app.mods_error = Some(error);
+                    }
+                }
+            }
+        }
+        Message::HorizonModsSearched(target_id, result) => {
+            if app.mod_target_instance.as_deref() == Some(target_id.as_str()) {
+                app.mods_busy = false;
+                match result {
+                    Ok(results) => {
+                        app.horizon_mod_results = results;
+                        app.mods_error = None;
+                    }
+                    Err(error) => {
+                        app.horizon_mod_results.clear();
                         app.mods_error = Some(error);
                     }
                 }
@@ -2802,7 +2826,229 @@ fn settings_card(
     .into()
 }
 
+
+fn mod_icon(bytes: Option<Vec<u8>>, fallback: String) -> Element<'static, Message> {
+    if let Some(bytes) = bytes {
+        return image::Image::new(image::Handle::from_bytes(bytes))
+            .width(Length::Fixed(48.0))
+            .height(Length::Fixed(48.0))
+            .content_fit(ContentFit::Cover)
+            .border_radius(10.0)
+            .into();
+    }
+    let letter = fallback.chars().next().unwrap_or('M').to_uppercase().to_string();
+    container(text(letter).size(20).color(CYAN))
+        .width(48)
+        .height(48)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(|_| glass_style(CYAN_DARK, EDGE))
+        .into()
+}
+
 fn catalog_page(app: &App) -> Element<'_, Message> {
+    let selected = app.mod_target_instance.as_deref()
+        .and_then(|id| app.data.instances.iter().find(|item| item.id.0 == id));
+    if selected.is_some_and(|instance| matches!(instance.platform, GamePlatform::Horizon | GamePlatform::HorizonOffline)) {
+        horizon_catalog_page(app)
+    } else {
+        java_catalog_page(app)
+    }
+}
+
+fn horizon_catalog_page(app: &App) -> Element<'_, Message> {
+    let selected = app.mod_target_instance.as_deref()
+        .and_then(|id| app.data.instances.iter().find(|item| item.id.0 == id));
+    let mut targets = row![text("СБОРКА").size(9).color(MUTED)].spacing(7).align_y(Alignment::Center);
+    let mut target_count = 0usize;
+    for instance in app.data.instances.iter().filter(|item| {
+        matches!(item.platform, GamePlatform::Horizon | GamePlatform::HorizonOffline)
+    }) {
+        target_count += 1;
+        let active = app.mod_target_instance.as_deref() == Some(instance.id.0.as_str());
+        let label = format!("{} · {} · {}", instance.name, instance.game_version, loader_label(instance.loader));
+        targets = targets.push(
+            button(text(label).size(9).color(if active { CYAN } else { TEXT }))
+                .on_press(Message::ModTargetSelected(instance.id.0.clone()))
+                .padding([8, 11])
+                .style(move |theme, _status| {
+                    let mut style = button::secondary(theme, button::Status::Active);
+                    style.background = Some(if active { CYAN_DARK } else { PANEL_LIGHT }.into());
+                    style.text_color = if active { CYAN } else { TEXT };
+                    style.border = Border::default().rounded(9).width(1).color(if active { EDGE_BRIGHT } else { EDGE });
+                    style
+                })
+        );
+    }
+
+    let current_profile = selected.map(|item| format!(
+        "{} · Minecraft {} · {}",
+        item.name, item.game_version, loader_label(item.loader)
+    )).unwrap_or_else(|| "Сборка не выбрана".to_owned());
+
+    let mut installed_list = column![].spacing(7);
+    if app.horizon_installed_mods.is_empty() {
+        installed_list = installed_list.push(
+            text("В этой сборке пока нет Horizon-модов, установленных через GlowstoneCL.")
+                .size(9).color(SUBTLE)
+        );
+    } else {
+        for item in &app.horizon_installed_mods {
+            let target_id = app.mod_target_instance.clone().unwrap_or_default();
+            let project_id = item.id.clone();
+            installed_list = installed_list.push(
+                container(
+                    row![
+                        mod_icon(item.icon_data.clone(), item.name.clone()),
+                        column![
+                            text(item.name.clone()).size(10).color(TEXT),
+                            text(format!("{} · {}", item.version, item.file_name)).size(8).color(MUTED),
+                            text("HORIZON CONTENT · HMOD").size(7).color(CYAN),
+                        ].spacing(3),
+                        Space::new().width(Length::Fill),
+                        quiet_button("Удалить", Message::RemoveHorizonMod(target_id, project_id)),
+                    ].align_y(Alignment::Center).spacing(9)
+                )
+                .padding(10)
+                .width(Length::Fill)
+                .style(|_| glass_style(PANEL_LIGHT, EDGE))
+            );
+        }
+    }
+
+    let mut results_list = column![].spacing(9);
+    for project in &app.horizon_mod_results {
+        let installed = app.horizon_installed_mods.iter().any(|item| item.id == project.id);
+        let compatible = project.versions.iter().any(|version| {
+            version.game == "26.3"
+                && version.file.name.ends_with(".hmod")
+                && version.capabilities.iter().any(|capability| capability == "registries")
+        });
+        let signature_required = project.key.is_some()
+            || project.versions.iter().any(|version| {
+                version.game == "26.3" && version.file.signature.is_some()
+            });
+        let project_id = project.id.clone();
+        let action = if installed {
+            Message::Info("Этот Horizon-мод уже установлен.")
+        } else if !compatible || signature_required {
+            Message::Info("Эту версию пока нельзя безопасно установить автоматически.")
+        } else {
+            Message::InstallHorizonMod(project_id)
+        };
+        let action_view: Element<'_, Message> = if installed {
+            status_chip("УСТАНОВЛЕН", CYAN_DARK, CYAN)
+        } else if signature_required {
+            status_chip("ПОДПИСЬ НЕ ПОДДЕРЖАНА", PANEL_LIGHT, ORANGE)
+        } else if compatible {
+            primary_button(
+                if app.mods_busy_project.as_deref() == Some(project.id.as_str()) { "Загрузка…" } else { "Установить" },
+                action,
+            )
+        } else {
+            status_chip("НЕТ HMOD ДЛЯ 26.3", PANEL_LIGHT, MUTED)
+        };
+        let authors = if project.authors.is_empty() {
+            "Horizon Registry".to_owned()
+        } else {
+            project.authors.join(", ")
+        };
+        let summary = if project.summary.is_empty() {
+            project.description.clone()
+        } else {
+            project.summary.clone()
+        };
+        results_list = results_list.push(
+            container(
+                row![
+                    mod_icon(project.icon_data.clone(), project.name.clone()),
+                    column![
+                        text(project.name.clone()).size(12).color(TEXT),
+                        text(format!("{} · {} загрузок", authors, format_downloads(project.downloads)))
+                            .size(8).color(CYAN),
+                        text(summary).size(9).color(MUTED),
+                        text(format!("Horizon 26.3 · {} версий", project.versions.len())).size(8).color(SUBTLE),
+                    ].spacing(5).width(Length::Fill),
+                    action_view,
+                ].spacing(12).align_y(Alignment::Center)
+            )
+            .padding(13)
+            .width(Length::Fill)
+            .style(|_| glass_style(PANEL, EDGE))
+        );
+    }
+
+    let mut content = column![
+        section_header("HORIZON · РЕЕСТР МОДОВ", "Собственные content-моды Horizon из официального реестра."),
+        container(
+            column![
+                row![
+                    text_input("Поиск Horizon-модов…", &app.search)
+                        .on_input(Message::SearchChanged)
+                        .on_submit(Message::SearchMods)
+                        .padding(10)
+                        .size(10)
+                        .width(Length::Fill),
+                    primary_button("Найти", Message::SearchMods),
+                ].spacing(8),
+                targets,
+                text(format!("Целевая сборка: {current_profile}")).size(9).color(MUTED),
+                text("Устанавливаются только .hmod content-моды с SHA-256 из реестра. Нативные .hnmod пока не поддерживаются.")
+                    .size(8).color(SUBTLE),
+            ].spacing(9)
+        )
+        .padding(14)
+        .width(Length::Fill)
+        .style(|_| glass_style(PANEL, EDGE)),
+    ].spacing(12).width(Length::Fill);
+
+    if target_count == 0 {
+        content = content.push(text("Создай сборку Horizon, чтобы устанавливать HMOD-моды.").size(10).color(MUTED));
+    } else {
+        content = content.push(
+            column![
+                row![
+                    text("УСТАНОВЛЕННЫЕ HORIZON-МОДЫ").size(9).color(CYAN),
+                    Space::new().width(Length::Fill),
+                    text(format!("{}", app.horizon_installed_mods.len())).size(9).color(MUTED),
+                ].align_y(Alignment::Center),
+                installed_list,
+            ].spacing(8)
+        );
+        content = content.push(
+            row![
+                text("РЕЗУЛЬТАТЫ РЕЕСТРА").size(9).color(CYAN),
+                Space::new().width(Length::Fill),
+                quiet_button("Обновить", Message::SearchMods),
+            ].align_y(Alignment::Center)
+        );
+        if app.mods_busy {
+            content = content.push(text("Загружаю реестр Horizon…").size(9).color(MUTED));
+        }
+        if let Some(error) = &app.mods_error {
+            content = content.push(
+                container(text(error.clone()).size(9).color(ORANGE))
+                    .padding(11).width(Length::Fill)
+                    .style(|_| glass_style(PANEL, EDGE))
+            );
+        }
+        if app.horizon_mod_results.is_empty() && !app.mods_busy && app.mods_error.is_none() {
+            content = content.push(text("В реестре не нашлось подходящих Horizon-модов.").size(9).color(MUTED));
+        }
+        content = content.push(results_list);
+    }
+
+    if let Some(notice) = &app.notice {
+        content = content.push(
+            container(text(notice.clone()).size(9).color(TEXT))
+                .padding(10).width(Length::Fill)
+                .style(|_| glass_style(CYAN_DARK, EDGE_BRIGHT))
+        );
+    }
+    content.into()
+}
+
+fn java_catalog_page(app: &App) -> Element<'_, Message> {
     let selected = app.mod_target_instance.as_deref()
         .and_then(|id| app.data.instances.iter().find(|item| item.id.0 == id));
     let mut targets = row![text("СБОРКА").size(9).color(MUTED)].spacing(7).align_y(Alignment::Center);
@@ -2848,6 +3094,7 @@ fn catalog_page(app: &App) -> Element<'_, Message> {
             installed_list = installed_list.push(
                 container(
                     row![
+                        mod_icon(item.icon_data.clone(), item.title.clone()),
                         column![
                             text(item.title.clone()).size(10).color(TEXT),
                             text(format!("{} · {}", item.version_number, item.file_name)).size(8).color(MUTED),
@@ -2887,6 +3134,7 @@ fn catalog_page(app: &App) -> Element<'_, Message> {
         results_list = results_list.push(
             container(
                 row![
+                    mod_icon(project.icon_data.clone(), project.title.clone()),
                     column![
                         text(project_name).size(12).color(TEXT),
                         text(format!("от {} · {} загрузок", project.author, format_downloads(project.downloads)))
