@@ -353,7 +353,23 @@ fn version_matches_instance(version: &Value, game_version: &str, loader: &str) -
     })
 }
 
-/// Install a project and walk its required dependency graph without recursive async calls.
+enum InstallStep {
+    Visit {
+        project_id: String,
+        version_id: Option<String>,
+        dependency: bool,
+    },
+    Install {
+        project_id: String,
+        project: Value,
+        version: Value,
+        dependency: bool,
+    },
+}
+
+/// Resolve the complete dependency graph first, then install dependencies before
+/// the requested root. If a later file download fails, retrying can finish the graph
+/// without marking the root as installed prematurely.
 pub async fn install(instance: GameInstance, project_id: String) -> Result<Vec<InstalledMod>, String> {
     let loader = loader_tag(&instance)?;
     if !valid_project_id(&project_id) {
@@ -362,86 +378,124 @@ pub async fn install(instance: GameInstance, project_id: String) -> Result<Vec<I
     let http = client()?;
     let game_version = resolve_game_version(&http, &instance.game_version).await?;
     let mut manifest = read_manifest(&instance.id.0)?;
-    if manifest.mods.iter().any(|item| item.project_id == project_id) {
-        return Ok(manifest.mods);
-    }
 
-    // (project ID, exact version ID, is dependency)
-    let mut pending = vec![(project_id, None::<String>, false)];
+    let root_version = manifest.mods.iter()
+        .find(|item| item.project_id == project_id)
+        .map(|item| item.version_id.clone())
+        .filter(|value| !value.is_empty());
+
+    let mut pending = vec![InstallStep::Visit {
+        project_id,
+        version_id: root_version,
+        dependency: false,
+    }];
     let mut visited = HashSet::new();
-    while let Some((current_project_id, exact_version_id, is_dependency)) = pending.pop() {
-        if manifest.mods.iter().any(|item| item.project_id == current_project_id)
-            || !visited.insert(current_project_id.clone())
-        {
-            continue;
-        }
-        if visited.len() > 128 {
-            return Err("У мода обнаружено слишком много зависимостей (лимит 128).".to_owned());
-        }
-        if !valid_project_id(&current_project_id) {
-            return Err("Modrinth вернул некорректный ID зависимости.".to_owned());
-        }
+    let mut resolved_count = 0usize;
 
-        let project = get_project(&http, &current_project_id).await?;
-        if project["project_type"].as_str() != Some("mod") {
-            return Err(format!(
-                "Зависимость «{}» не является модом Minecraft.",
-                project["title"].as_str().unwrap_or(&current_project_id)
-            ));
-        }
-        let version = if let Some(version_id) = exact_version_id.as_deref() {
-            get_version(&http, version_id).await?
-        } else {
-            compatible_version(&http, &instance, &current_project_id).await?
-        };
-        if !version_matches_instance(&version, &game_version, loader) {
-            return Err(format!(
-                "Версия зависимости «{}» не совместима с Minecraft {game_version} и загрузчиком {loader}.",
-                project["title"].as_str().unwrap_or(&current_project_id)
-            ));
-        }
-
-        if let Some(dependencies) = version["dependencies"].as_array() {
-            for dep in dependencies {
-                if dep["dependency_type"].as_str() != Some("required") {
+    while let Some(step) = pending.pop() {
+        match step {
+            InstallStep::Visit { project_id, mut version_id, dependency } => {
+                if !visited.insert(project_id.clone()) {
                     continue;
                 }
-                let dependency_version_id = dep["version_id"].as_str().map(str::to_owned);
-                if let Some(dependency_project_id) = dep["project_id"].as_str() {
-                    pending.push((
-                        dependency_project_id.to_owned(),
-                        dependency_version_id,
-                        true,
-                    ));
-                } else if let Some(version_id) = dependency_version_id {
-                    let fixed = get_version(&http, &version_id).await?;
-                    let dependency_project_id = fixed["project_id"].as_str().ok_or_else(|| {
-                        format!("Не удалось определить проект обязательной зависимости {version_id}.")
-                    })?;
-                    pending.push((
-                        dependency_project_id.to_owned(),
-                        Some(version_id),
-                        true,
-                    ));
-                } else if let Some(file_name) = dep["file_name"].as_str() {
+                resolved_count += 1;
+                if resolved_count > 128 {
+                    return Err("У мода обнаружено слишком много зависимостей (лимит 128).".to_owned());
+                }
+                if !valid_project_id(&project_id) {
+                    return Err("Modrinth вернул некорректный ID зависимости.".to_owned());
+                }
+
+                // Reuse the exact version already installed by GlowstoneCL so that
+                // a dependency retry does not silently upgrade part of the modpack.
+                if version_id.is_none() {
+                    version_id = manifest.mods.iter()
+                        .find(|item| item.project_id == project_id)
+                        .map(|item| item.version_id.clone())
+                        .filter(|value| !value.is_empty());
+                }
+
+                let project = get_project(&http, &project_id).await?;
+                if project["project_type"].as_str() != Some("mod") {
                     return Err(format!(
-                        "У обязательной зависимости {file_name} нет проекта или версии на Modrinth; её нужно добавить вручную."
+                        "Зависимость «{}» не является модом Minecraft.",
+                        project["title"].as_str().unwrap_or(&project_id)
                     ));
                 }
+                let version = if let Some(version_id) = version_id.as_deref() {
+                    get_version(&http, version_id).await?
+                } else {
+                    compatible_version(&http, &instance, &project_id).await?
+                };
+                if !version_matches_instance(&version, &game_version, loader) {
+                    return Err(format!(
+                        "Версия «{}» не совместима с Minecraft {game_version} и загрузчиком {loader}.",
+                        project["title"].as_str().unwrap_or(&project_id)
+                    ));
+                }
+
+                // The install step is pushed first. Dependencies go on top of it,
+                // so the requested root is written only after its required graph.
+                pending.push(InstallStep::Install {
+                    project_id: project_id.clone(),
+                    project,
+                    version: version.clone(),
+                    dependency,
+                });
+
+                if let Some(dependencies) = version["dependencies"].as_array() {
+                    for dep in dependencies {
+                        if dep["dependency_type"].as_str() != Some("required") {
+                            continue;
+                        }
+                        let dependency_version_id = dep["version_id"].as_str().map(str::to_owned);
+                        if let Some(dependency_project_id) = dep["project_id"].as_str() {
+                            pending.push(InstallStep::Visit {
+                                project_id: dependency_project_id.to_owned(),
+                                version_id: dependency_version_id,
+                                dependency: true,
+                            });
+                        } else if let Some(version_id) = dependency_version_id {
+                            let fixed = get_version(&http, &version_id).await?;
+                            let dependency_project_id = fixed["project_id"].as_str()
+                                .ok_or_else(|| format!(
+                                    "Не удалось определить проект обязательной зависимости {version_id}."
+                                ))?;
+                            pending.push(InstallStep::Visit {
+                                project_id: dependency_project_id.to_owned(),
+                                version_id: Some(version_id),
+                                dependency: true,
+                            });
+                        } else if let Some(file_name) = dep["file_name"].as_str() {
+                            return Err(format!(
+                                "У обязательной зависимости {file_name} нет ID проекта или версии на Modrinth; её нужно добавить вручную."
+                            ));
+                        } else {
+                            return Err(format!(
+                                "Modrinth вернул обязательную зависимость без проекта, версии или имени файла для мода {}.",
+                                project["title"].as_str().unwrap_or(&project_id)
+                            ));
+                        }
+                    }
+                }
+            }
+            InstallStep::Install { project_id, project, version, dependency } => {
+                if manifest.mods.iter().any(|item| item.project_id == project_id) {
+                    continue;
+                }
+                let file = selected_jar(&version)?;
+                let file_name = download_jar(&http, &instance.id.0, &project_id, &file).await?;
+                manifest.mods.push(InstalledMod {
+                    project_id: project_id.clone(),
+                    title: project["title"].as_str().unwrap_or(&project_id).to_owned(),
+                    file_name,
+                    version_number: version["version_number"].as_str().unwrap_or("unknown").to_owned(),
+                    version_id: version["id"].as_str().unwrap_or_default().to_owned(),
+                    dependency,
+                });
+                save_manifest(&instance.id.0, &manifest)?;
             }
         }
-
-        let file = selected_jar(&version)?;
-        let file_name = download_jar(&http, &instance.id.0, &current_project_id, &file).await?;
-        manifest.mods.push(InstalledMod {
-            project_id: current_project_id.clone(),
-            title: project["title"].as_str().unwrap_or(&current_project_id).to_owned(),
-            file_name,
-            version_number: version["version_number"].as_str().unwrap_or("unknown").to_owned(),
-            version_id: version["id"].as_str().unwrap_or_default().to_owned(),
-            dependency: is_dependency,
-        });
-        save_manifest(&instance.id.0, &manifest)?;
     }
 
     Ok(manifest.mods)
