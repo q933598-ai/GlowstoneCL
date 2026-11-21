@@ -10,7 +10,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 
 use base64::Engine as _;
-use crust_core::authenticator::{Account as GameAccount, AccountType};
+use crust_core::authenticator::{Account as GameAccount, AccountType, Ownership};
 use crust_core::foundation::events::Event;
 use crust_core::launcher::{
     Launch as JavaLaunch, LaunchOptions as JavaLaunchOptions, LoaderKind as JavaLoaderKind,
@@ -68,6 +68,18 @@ pub async fn launch_instance(
             refreshed
         }
     };
+
+    if account.kind == AccountKind::Microsoft
+        && !matches!(
+            game_account.meta.ownership,
+            Ownership::Owned | Ownership::GamePass
+        )
+    {
+        return Err(
+            "Не удалось подтвердить право запуска Minecraft Java Edition для этого Microsoft-аккаунта. Проверь лицензию или активную подписку Game Pass."
+                .to_owned(),
+        );
+    }
 
     match instance.platform {
         GamePlatform::Java => {
