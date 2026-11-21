@@ -453,7 +453,8 @@ fn platform_card(
             container(text(number).size(11).color(ACCENT))
                 .width(34)
                 .height(34)
-                .center(Length::Fill)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center)
                 .style(move |_| panel_style(bg, Color::TRANSPARENT)),
             column![
                 text(title).size(12).color(TEXT),
