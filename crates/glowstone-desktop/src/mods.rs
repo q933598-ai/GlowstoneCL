@@ -112,14 +112,15 @@ pub async fn search(instance: GameInstance, query: String) -> Result<Vec<ModProj
         [format!("categories:{loader}")]
     ]).to_string();
 
+    let mut search_url = reqwest::Url::parse(&format!("{API}/search"))
+        .map_err(|error| format!("Некорректный адрес поиска Modrinth: {error}"))?;
+    search_url.query_pairs_mut()
+        .append_pair("query", query.trim())
+        .append_pair("facets", &facets)
+        .append_pair("index", "downloads")
+        .append_pair("limit", "30");
     let response = http
-        .get(format!("{API}/search"))
-        .query(&[
-            ("query", query.trim()),
-            ("facets", facets.as_str()),
-            ("index", "downloads"),
-            ("limit", "30"),
-        ])
+        .get(search_url)
         .send()
         .await
         .map_err(|error| format!("Не удалось обратиться к Modrinth: {error}"))?
@@ -213,8 +214,12 @@ async fn compatible_versions(
     let game_version = resolve_game_version(http, &instance.game_version).await?;
     let game_versions = serde_json::json!([game_version]).to_string();
     let loaders = serde_json::json!([loader]).to_string();
-    http.get(format!("{API}/project/{project_id}/version"))
-        .query(&[("game_versions", game_versions.as_str()), ("loaders", loaders.as_str())])
+    let mut versions_url = reqwest::Url::parse(&format!("{API}/project/{project_id}/version"))
+        .map_err(|error| format!("Некорректный адрес списка версий {project_id}: {error}"))?;
+    versions_url.query_pairs_mut()
+        .append_pair("game_versions", &game_versions)
+        .append_pair("loaders", &loaders);
+    http.get(versions_url)
         .send()
         .await
         .map_err(|error| format!("Не удалось получить версии мода {project_id}: {error}"))?
@@ -440,6 +445,7 @@ pub async fn install(instance: GameInstance, project_id: String) -> Result<Vec<I
                     ));
                 }
 
+                let project_title = project["title"].as_str().unwrap_or(&project_id).to_owned();
                 // The install step is pushed first. Dependencies go on top of it,
                 // so the requested root is written only after its required graph.
                 pending.push(InstallStep::Install {
@@ -479,7 +485,7 @@ pub async fn install(instance: GameInstance, project_id: String) -> Result<Vec<I
                         } else {
                             return Err(format!(
                                 "Modrinth вернул обязательную зависимость без проекта, версии или имени файла для мода {}.",
-                                project["title"].as_str().unwrap_or(&project_id)
+                                &project_title
                             ));
                         }
                     }
