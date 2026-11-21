@@ -28,9 +28,41 @@ use glowstone_core::{GameInstance, GamePlatform, LoaderKind};
 
 const HORIZON_NIGHTLY_API: &str =
     "https://api.github.com/repos/horizon-rust/horizon/releases/tags/nightly";
+const HORIZON_OFFLINE_NIGHTLY_API: &str =
+    "https://api.github.com/repos/gerdaroot/Horizon-Offline-Launcher/releases/tags/nightly";
 const HORIZON_RELEASE_KEY: &str = "MU4oiIQcCxkZvbwSjjXs7SySCuM6ywRQ3nGaJYZG0gw=";
+const HORIZON_OFFLINE_RELEASE_KEY: &str = "uzGcg2Sc1fAl26IpR2jEnhbmRhXTaiTyO9eWc2cpK1E=";
 const HORIZON_SIGNATURE_DOMAIN: &str = "horizon release ";
 const HORIZON_INSTALLED_MARKER: &str = ".installed";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HorizonFlavor {
+    Official,
+    Offline,
+}
+
+impl HorizonFlavor {
+    fn storage_name(self) -> &'static str {
+        match self {
+            Self::Official => "horizon",
+            Self::Offline => "horizon-offline",
+        }
+    }
+
+    fn release_api(self) -> &'static str {
+        match self {
+            Self::Official => HORIZON_NIGHTLY_API,
+            Self::Offline => HORIZON_OFFLINE_NIGHTLY_API,
+        }
+    }
+
+    fn release_key(self) -> &'static str {
+        match self {
+            Self::Official => HORIZON_RELEASE_KEY,
+            Self::Offline => HORIZON_OFFLINE_RELEASE_KEY,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct LaunchOutcome {
@@ -90,11 +122,20 @@ pub async fn launch_instance(
                 || game_account.kind() != AccountType::Xbox
             {
                 return Err(
-                    "Horizon требует Microsoft-аккаунт с доступом к Minecraft: Java Edition."
+                    "Официальный Horizon требует Microsoft-аккаунт с доступом к Minecraft: Java Edition. Для локальной игры создай сборку Horizon Offline."
                         .to_owned(),
                 );
             }
-            launch_horizon(instance, data_root, instance_dir, game_account).await
+            launch_horizon(instance, data_root, instance_dir, game_account, HorizonFlavor::Official).await
+        }
+        GamePlatform::HorizonOffline => {
+            if account.kind != AccountKind::Offline {
+                return Err(
+                    "Horizon Offline использует локальный offline-профиль. Выбери или создай offline-аккаунт."
+                        .to_owned(),
+                );
+            }
+            launch_horizon(instance, data_root, instance_dir, game_account, HorizonFlavor::Offline).await
         }
     }
 }
@@ -220,6 +261,7 @@ struct GithubAsset {
 struct HorizonBuild {
     version: String,
     directory: PathBuf,
+    flavor: HorizonFlavor,
 }
 
 impl HorizonBuild {
@@ -265,13 +307,14 @@ async fn launch_horizon(
     data_root: PathBuf,
     instance_dir: PathBuf,
     account: GameAccount,
+    flavor: HorizonFlavor,
 ) -> Result<LaunchOutcome, String> {
     let client = reqwest::Client::builder()
         .user_agent("GlowstoneCL/0.1.0 (https://github.com/q933598-ai/GlowstoneCL)")
         .build()
         .map_err(|error| error.to_string())?;
 
-    let build = ensure_horizon_build(&client, &data_root).await?;
+    let build = ensure_horizon_build(&client, &data_root, flavor).await?;
     let pins = build.pins()?;
     validate_horizon_version(&instance.game_version, &pins.version)?;
 
@@ -301,40 +344,73 @@ async fn launch_horizon(
         );
     }
 
-    let game_root = data_root.clone();
     let horizon_ready = is_horizon_prepared(&build).await;
     if !horizon_ready {
-        // Horizon does not ship Mojang's game files. CrustCore installs the
-        // official, licensed files and matching Java runtime in the shared root.
-        let mut java_options = JavaLaunchOptions::new(game_root.clone(), pins.version.clone());
-        java_options.download_concurrency = 10;
-        java_options.memory.max = "4G".to_owned();
-        let java_launch = JavaLaunch::new(java_options, account.clone())
-            .map_err(|error| format!("Не удалось создать установщик Minecraft для Horizon: {error}"))?;
-        let prepared_java = java_launch
-            .prepare()
-            .await
-            .map_err(|error| format!("Не удалось загрузить файлы Minecraft для Horizon: {error}"))?;
+        match flavor {
+            HorizonFlavor::Official => {
+                // Official Horizon uses CrustCore to install Mojang files for the signed-in owner.
+                let mut java_options = JavaLaunchOptions::new(data_root.clone(), pins.version.clone());
+                java_options.download_concurrency = 10;
+                java_options.memory.max = "4G".to_owned();
+                let java_launch = JavaLaunch::new(java_options, account.clone())
+                    .map_err(|error| format!("Не удалось создать установщик Minecraft для Horizon: {error}"))?;
+                let prepared_java = java_launch
+                    .prepare()
+                    .await
+                    .map_err(|error| format!("Не удалось загрузить файлы Minecraft для Horizon: {error}"))?;
 
-        let version_id = prepared_java.version.id.clone();
-        let version_json_path = game_root
-            .join("versions")
-            .join(&version_id)
-            .join(format!("{version_id}.json"));
-        let version_bytes = tokio::fs::read(&version_json_path)
-            .await
-            .map_err(|error| format!("Не найден JSON версии Minecraft: {error}"))?;
-        let version_json: Value = serde_json::from_slice(&version_bytes)
-            .map_err(|error| format!("JSON версии Minecraft повреждён: {error}"))?;
-        let server_jar = ensure_server_jar(&client, &version_json, &game_root, &version_id).await?;
+                let version_id = prepared_java.version.id.clone();
+                let version_json_path = data_root
+                    .join("versions")
+                    .join(&version_id)
+                    .join(format!("{version_id}.json"));
+                let version_bytes = tokio::fs::read(&version_json_path)
+                    .await
+                    .map_err(|error| format!("Не найден JSON версии Minecraft: {error}"))?;
+                let version_json: Value = serde_json::from_slice(&version_bytes)
+                    .map_err(|error| format!("JSON версии Minecraft повреждён: {error}"))?;
+                let server_jar = ensure_server_jar(&client, &version_json, &data_root, &version_id).await?;
 
-        let java_home = prepared_java
-            .java
-            .parent()
-            .and_then(Path::parent)
-            .ok_or_else(|| "Не удалось определить каталог Java Runtime.".to_owned())?
-            .to_path_buf();
-        prepare_horizon(&build, &game_root, &server_jar, &java_home).await?;
+                let java_home = prepared_java
+                    .java
+                    .parent()
+                    .and_then(Path::parent)
+                    .ok_or_else(|| "Не удалось определить каталог Java Runtime.".to_owned())?
+                    .to_path_buf();
+                prepare_horizon(&build, Some(&data_root), None, Some(&server_jar), Some(&java_home)).await?;
+            }
+            HorizonFlavor::Offline => {
+                let source = find_offline_minecraft_source(&pins.version)?;
+                let (server_jar, minecraft_dir, prism_dir) = if source.prism {
+                    (None, None, Some(source.directory.as_path()))
+                } else {
+                    let version_json_path = source.directory
+                        .join("versions")
+                        .join(&pins.version)
+                        .join(format!("{}.json", pins.version));
+                    let version_bytes = tokio::fs::read(&version_json_path)
+                        .await
+                        .map_err(|error| format!("Не найден локальный JSON Minecraft {}: {error}", pins.version))?;
+                    let version_json: Value = serde_json::from_slice(&version_bytes)
+                        .map_err(|error| format!("Локальный JSON Minecraft повреждён: {error}"))?;
+                    let local_client = source.directory
+                        .join("versions")
+                        .join(&pins.version)
+                        .join(format!("{}.jar", pins.version));
+                    if !local_client.is_file() {
+                        return Err(format!("Не найден локальный client jar Minecraft {}. Запусти эту версию в своём Java-лаунчере один раз.", pins.version));
+                    }
+                    let server_jar = ensure_server_jar(
+                        &client,
+                        &version_json,
+                        &data_root.join("horizon-offline"),
+                        &pins.version,
+                    ).await?;
+                    (Some(server_jar), Some(source.directory.as_path()), None)
+                };
+                prepare_horizon(&build, minecraft_dir, prism_dir, server_jar.as_deref(), None).await?;
+            }
+        }
         if !is_horizon_prepared(&build).await {
             return Err("Horizon preparer завершился, но проверка ресурсов не прошла.".to_owned());
         }
@@ -342,6 +418,10 @@ async fn launch_horizon(
 
     fs::create_dir_all(&instance_dir)
         .map_err(|error| format!("Не удалось создать папку мира Horizon: {error}"))?;
+    if flavor == HorizonFlavor::Offline {
+        fs::write(instance_dir.join("horizon-player.txt"), format!("name:{}\n", account.name))
+            .map_err(|error| format!("Не удалось сохранить offline-ник Horizon: {error}"))?;
+    }
     launch_horizon_client(&build, &instance_dir, &account).await
         .map(|exit_code| LaunchOutcome {
             instance_id: instance.id.0,
@@ -353,13 +433,14 @@ async fn launch_horizon(
 async fn ensure_horizon_build(
     client: &reqwest::Client,
     data_root: &Path,
+    flavor: HorizonFlavor,
 ) -> Result<HorizonBuild, String> {
-    let versions_dir = data_root.join("horizon").join("versions");
+    let versions_dir = data_root.join(flavor.storage_name()).join("versions");
     fs::create_dir_all(&versions_dir)
         .map_err(|error| format!("Не удалось создать каталог Horizon: {error}"))?;
 
-    let existing = installed_horizon_build(&versions_dir);
-    let release_result = fetch_horizon_release(client).await;
+    let existing = installed_horizon_build(&versions_dir, flavor);
+    let release_result = fetch_horizon_release(client, flavor).await;
     let release = match release_result {
         Ok(release) => release,
         Err(error) => {
@@ -375,6 +456,7 @@ async fn ensure_horizon_build(
         let candidate = HorizonBuild {
             version: version.clone(),
             directory: target.clone(),
+            flavor,
         };
         if candidate.client().is_file()
             && candidate.preparer().is_file()
@@ -418,7 +500,7 @@ async fn ensure_horizon_build(
         .text()
         .await
         .map_err(|error| error.to_string())?;
-    verify_horizon_signature(&version, &sums, &signature)?;
+    verify_horizon_signature(&version, &sums, &signature, flavor)?;
 
     let expected_sha256 = expected_sha256(&sums, asset_name)?;
     let archive_response = client
@@ -475,7 +557,7 @@ async fn ensure_horizon_build(
     }
     fs::write(stage.join(HORIZON_INSTALLED_MARKER), b"")
         .map_err(|error| format!("Не удалось пометить установку Horizon: {error}"))?;
-    HorizonBuild { version: version.clone(), directory: stage.clone() }
+    HorizonBuild { version: version.clone(), directory: stage.clone(), flavor }
         .pins()?;
     if target.exists() {
         fs::remove_dir_all(&target).map_err(|error| error.to_string())?;
@@ -483,10 +565,10 @@ async fn ensure_horizon_build(
     fs::rename(&stage, &target)
         .map_err(|error| format!("Не удалось завершить установку Horizon: {error}"))?;
 
-    Ok(HorizonBuild { version, directory: target })
+    Ok(HorizonBuild { version, directory: target, flavor })
 }
 
-fn installed_horizon_build(versions_dir: &Path) -> Option<HorizonBuild> {
+fn installed_horizon_build(versions_dir: &Path, flavor: HorizonFlavor) -> Option<HorizonBuild> {
     let mut versions: Vec<_> = fs::read_dir(versions_dir)
         .ok()?
         .filter_map(Result::ok)
@@ -497,15 +579,18 @@ fn installed_horizon_build(versions_dir: &Path) -> Option<HorizonBuild> {
     versions.reverse();
     versions.into_iter().find_map(|directory| {
         let version = directory.file_name()?.to_string_lossy().into_owned();
-        let build = HorizonBuild { version, directory };
+        let build = HorizonBuild { version, directory, flavor };
         (build.client().is_file() && build.preparer().is_file() && build.pins().is_ok())
             .then_some(build)
     })
 }
 
-async fn fetch_horizon_release(client: &reqwest::Client) -> Result<GithubRelease, String> {
+async fn fetch_horizon_release(
+    client: &reqwest::Client,
+    flavor: HorizonFlavor,
+) -> Result<GithubRelease, String> {
     client
-        .get(HORIZON_NIGHTLY_API)
+        .get(flavor.release_api())
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
@@ -563,11 +648,16 @@ fn valid_date(value: &str) -> bool {
         })
 }
 
-fn verify_horizon_signature(tag: &str, sums: &[u8], signatures: &str) -> Result<(), String> {
+fn verify_horizon_signature(
+    tag: &str,
+    sums: &[u8],
+    signatures: &str,
+    flavor: HorizonFlavor,
+) -> Result<(), String> {
     let mut message = format!("{HORIZON_SIGNATURE_DOMAIN}{tag}\n").into_bytes();
     message.extend_from_slice(sums);
     let key = base64::engine::general_purpose::STANDARD
-        .decode(HORIZON_RELEASE_KEY)
+        .decode(flavor.release_key())
         .map_err(|error| format!("Встроенный ключ Horizon повреждён: {error}"))?;
     let public_key = UnparsedPublicKey::new(&ED25519, key);
 
