@@ -8,6 +8,7 @@ use iced::{
 use glowstone_core::{GameInstance, GamePlatform, InstanceState, LoaderKind};
 
 use crate::auth::{self, DeviceCodePrompt, PollResult};
+use crate::game::{self, LaunchOutcome};
 use crate::store::{self, AccountKind, AccountProfile, PersistedState};
 
 const BG: Color = Color::from_rgb8(10, 15, 26);
@@ -64,6 +65,7 @@ pub enum Message {
     CreateInstance,
     SelectInstance(String),
     LaunchInstance(String),
+    LaunchFinished(String, Result<LaunchOutcome, String>),
     DeleteInstance(String),
     OfflineNameChanged(String),
     AddOfflineAccount,
@@ -94,6 +96,7 @@ pub struct App {
     client_id: String,
     device_code: Option<DeviceCodePrompt>,
     auth_busy: bool,
+    launch_busy: Option<String>,
 }
 
 impl Default for App {
@@ -112,6 +115,7 @@ impl Default for App {
             client_id: data.settings.microsoft_client_id.clone(),
             device_code: None,
             auth_busy: false,
+            launch_busy: None,
             data,
         }
     }
@@ -179,15 +183,56 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             }
         }
         Message::LaunchInstance(id) => {
-            if let Some(instance) = app.data.instances.iter().find(|item| item.id.0 == id) {
-                let has_account = app.data.settings.selected_account_id
-                    .as_ref()
-                    .is_some_and(|selected| app.data.accounts.iter().any(|account| &account.id == selected));
-                app.notice = Some(match instance.state {
-                    InstanceState::Ready if !has_account => "Сначала выбери игровой аккаунт в разделе «Аккаунты».".into(),
-                    InstanceState::Ready => "Профиль готов, но загрузчик Minecraft и фактический запуск ещё не подключены.".into(),
-                    _ => "Профиль сохранён, но файлы Minecraft ещё не установлены. Установщик — следующий этап.".into(),
-                });
+            if app.launch_busy.is_some() {
+                app.notice = Some("Другая сборка уже запускается. Дождись завершения операции.".into());
+                return iced::Task::none();
+            }
+            let Some(instance) = app.data.instances.iter().find(|item| item.id.0 == id).cloned() else {
+                app.notice = Some("Сборка не найдена.".into());
+                return iced::Task::none();
+            };
+            let Some(selected_id) = app.data.settings.selected_account_id.as_deref() else {
+                app.notice = Some("Сначала выбери игровой аккаунт в разделе «Аккаунты».".into());
+                return iced::Task::none();
+            };
+            let Some(account) = app.data.accounts.iter().find(|item| item.id == selected_id).cloned() else {
+                app.notice = Some("Выбранный аккаунт не найден. Выбери аккаунт заново.".into());
+                return iced::Task::none();
+            };
+
+            app.launch_busy = Some(id.clone());
+            app.notice = Some(format!(
+                "Подготовка {} {}. При первом запуске файлы игры и Java будут загружены автоматически…",
+                instance.platform.label(),
+                instance.game_version
+            ));
+            let client_id = app.client_id.clone();
+            return iced::Task::perform(
+                game::launch_instance(instance, account, client_id),
+                move |result| Message::LaunchFinished(id.clone(), result),
+            );
+        }
+        Message::LaunchFinished(id, result) => {
+            if app.launch_busy.as_deref() == Some(id.as_str()) {
+                app.launch_busy = None;
+            }
+            match result {
+                Ok(outcome) => {
+                    if let Some(instance) = app.data.instances.iter_mut().find(|item| item.id.0 == outcome.instance_id) {
+                        instance.state = InstanceState::Ready;
+                    }
+                    let save_error = store::save(&app.data).err();
+                    let exit_text = match outcome.exit_code {
+                        Some(0) => "Игра завершилась штатно.".to_owned(),
+                        Some(code) => format!("Игра завершилась с кодом {code}. Файлы сборки установлены."),
+                        None => "Игровой процесс завершился. Файлы сборки установлены.".to_owned(),
+                    };
+                    app.notice = Some(match save_error {
+                        Some(error) => format!("{exit_text} Не удалось сохранить состояние сборки: {error}"),
+                        None => exit_text,
+                    });
+                }
+                Err(error) => app.notice = Some(error),
             }
         }
         Message::DeleteInstance(id) => {
@@ -1161,7 +1206,7 @@ fn instances_page(app: &App) -> Element<'_, Message> {
             text("Загрузчик").size(9).color(MUTED),
             loader_buttons,
             primary_button("Создать сборку", Message::CreateInstance),
-            text("Пока создаётся профиль и его настройки. Загрузка файлов игры и запуск будут подключены следующим этапом.")
+            text("Первый запуск автоматически загрузит нужные файлы игры, библиотеки и Java Runtime.")
                 .size(9)
                 .color(SUBTLE),
         ]
