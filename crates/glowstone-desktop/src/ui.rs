@@ -154,7 +154,9 @@ fn sidebar(app: &App) -> Element<'_, Message> {
         Space::new().height(Length::Fill),
         rule::horizontal(1).style(|_| rule::Style {
             color: LINE,
-            ..Default::default()
+            radius: iced::border::Radius::default(),
+            fill_mode: rule::FillMode::Full,
+            snap: true,
         }),
         row![
             container(text("U").size(13).color(ACCENT))
@@ -258,7 +260,12 @@ fn page_content(app: &App) -> Element<'_, Message> {
 
     container(content)
         .width(Length::Fill)
-        .padding([12, 30, 30, 30])
+        .padding(iced::Padding {
+            top: 12.0,
+            right: 30.0,
+            bottom: 30.0,
+            left: 30.0,
+        })
         .into()
 }
 
@@ -369,7 +376,9 @@ fn home_page(app: &App) -> Element<'_, Message> {
             ],
             rule::horizontal(1).style(|_| rule::Style {
                 color: LINE,
-                ..Default::default()
+                radius: iced::border::Radius::default(),
+                fill_mode: rule::FillMode::Full,
+                snap: true,
             }),
             row![
                 shortcut("▦", "Создай сборку", "Отдельная папка для каждой игры."),
@@ -514,7 +523,9 @@ fn empty_page(
                 Space::new().height(16),
                 rule::horizontal(1).style(|_| rule::Style {
                     color: LINE,
-                    ..Default::default()
+                    radius: iced::border::Radius::default(),
+                    fill_mode: rule::FillMode::Full,
+                    snap: true,
                 }),
                 Space::new().height(14),
                 text(empty_title).size(17).color(TEXT),
