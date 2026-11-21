@@ -630,15 +630,16 @@ async fn install_offline_skins_mod(
     let skin_bytes = tokio::fs::read(skin_path)
         .await
         .map_err(|error| format!("Не удалось прочитать выбранный offline-скин: {error}"))?;
-    let skin_key = player_name.to_ascii_lowercase();
-    tokio::fs::write(skins_dir.join(format!("{skin_key}.png")), &skin_bytes)
+    // OfflineSkins resolves the file by the offline GameProfile name.
+    // Preserve its exact casing instead of normalizing it to lowercase.
+    tokio::fs::write(skins_dir.join(format!("{player_name}.png")), &skin_bytes)
         .await
         .map_err(|error| format!("Не удалось записать PNG в config/offlineskins: {error}"))?;
     let config = serde_json::json!({
-        "selectedSkinName": skin_key,
+        "selectedSkinName": player_name,
         "defaultModel": match model {
-            SkinModel::Classic => "classic",
-            SkinModel::Slim => "slim",
+            SkinModel::Classic => "steve",
+            SkinModel::Slim => "alex",
         }
     });
     tokio::fs::write(
