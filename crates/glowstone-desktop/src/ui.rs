@@ -3478,7 +3478,7 @@ fn settings_page(app: &App) -> Element<'_, Message> {
     };
 
     column![
-        settings_card("ВНЕШНИЙ ВИД", "Шрифт интерфейса", "На Linux используется Inter, на Windows — Segoe UI. Установи Inter через пакет inter-font в CachyOS/Arch."),
+        settings_card("ВНЕШНИЙ ВИД", "Шрифт Monocraft", "Встроенный пиксельный моноширинный шрифт в стиле Minecraft. Включён в приложение и одинаково работает на Linux и Windows (лицензия SIL OFL 1.1)."),
         settings_card("LINUX DISPLAY", "Нативный Wayland и X11", "GlowstoneCL поддерживает оба backend. В Wayland-сессии можно запускать приложение напрямую через Wayland без XWayland."),
         settings_card("ХРАНЕНИЕ", "Профили и сборки", data_path),
         settings_card("БЕЗОПАСНОСТЬ", "Microsoft refresh token", "Токены сохраняются через системное хранилище паролей. Если Secret Service недоступен, приложение покажет предупреждение."),
