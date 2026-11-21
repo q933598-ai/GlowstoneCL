@@ -1312,12 +1312,7 @@ fn sidebar(app: &App) -> Element<'_, Message> {
 
     let profile = button(
         row![
-            container(icon("user", CYAN, 18.0))
-                .width(38)
-                .height(38)
-                .align_x(Alignment::Center)
-                .align_y(Alignment::Center)
-                .style(|_| glass_style(CYAN_DARK, EDGE)),
+            account_avatar(selected_account),
             column![
                 text(current_account.to_owned()).size(10).color(TEXT),
                 row![
@@ -1368,6 +1363,37 @@ fn sidebar(app: &App) -> Element<'_, Message> {
     .padding(12)
     .style(|_| glass_style(SIDEBAR, EDGE))
     .into()
+}
+
+fn account_avatar(account: Option<&AccountProfile>) -> Element<'static, Message> {
+    if let Some(account) = account {
+        if let Ok(Some((path, _))) = store::active_skin_file(&account.uuid) {
+            return image::Image::new(image::Handle::from_path(path))
+                .width(Length::Fixed(38.0))
+                .height(Length::Fixed(38.0))
+                .content_fit(ContentFit::Cover)
+                .border_radius(10.0)
+                .into();
+        }
+        let initial = account.name.chars().next()
+            .unwrap_or('G')
+            .to_uppercase()
+            .to_string();
+        return container(text(initial).size(17).color(CYAN))
+            .width(38)
+            .height(38)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .style(|_| glass_style(CYAN_DARK, EDGE_BRIGHT))
+            .into();
+    }
+    container(icon("user", SUBTLE, 18.0))
+        .width(38)
+        .height(38)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(|_| glass_style(CYAN_DARK, EDGE))
+        .into()
 }
 
 fn section_label(label: &'static str) -> Element<'static, Message> {
