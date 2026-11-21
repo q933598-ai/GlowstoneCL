@@ -124,6 +124,7 @@ pub enum Message {
     ToggleFavorite(String),
     OpenNews(usize),
     RefreshRecentPlays,
+    OpenRepository,
     Info(&'static str),
 }
 
@@ -1157,6 +1158,12 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 app.recent_plays = latest;
             }
         }
+        Message::OpenRepository => {
+            app.notice = Some(match webbrowser::open("https://github.com/q933598-ai/GlowstoneCL") {
+                Ok(()) => "Открываю репозиторий GlowstoneCL на GitHub.".to_owned(),
+                Err(error) => format!("Не удалось открыть GitHub: {error}"),
+            });
+        }
         Message::Info(message) => app.notice = Some(message.to_owned()),
     }
 
@@ -1520,8 +1527,8 @@ fn top_bar(app: &App) -> Element<'_, Message> {
 
     row![
         search,
-        round_action("community", Message::Info("Ссылку на сообщество добавим позже.")),
-        round_action("globe", Message::Navigate(Page::Catalog)),
+        round_action("github", Message::OpenRepository),
+        round_action("puzzle", Message::Navigate(Page::Catalog)),
         round_action("settings", Message::Navigate(Page::Settings)),
     ]
     .spacing(10)
@@ -3822,6 +3829,7 @@ fn icon(
                 "settings" => "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 3.1-.2-.1a1.7 1.7 0 0 0-1.9.2l-.1.1h-3.6l-.1-.2a1.7 1.7 0 0 0-1.6-1 1.7 1.7 0 0 0-1.1.4l-.2.1-3.1-1.8.1-.2a1.7 1.7 0 0 0-.2-1.9l-.1-.1v-3.6l.2-.1a1.7 1.7 0 0 0 .6-2.7l-.1-.2 1.8-3.1.2.1a1.7 1.7 0 0 0 1.9-.2l.1-.1h3.6l.1.2a1.7 1.7 0 0 0 2.7.6l.2-.1 3.1 1.8-.1.2a1.7 1.7 0 0 0 .2 1.9l.1.1V15Z",
                 "search" => "M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15Z M16 16l5 5",
                 "community" => "M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2 M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M20 8v6 M17 11h6",
+                "github" => "M9 19c-4 1.2-4-2-5-3 M16 21v-3.1c0-.9-.3-1.6-.8-2 2.7-.3 5.5-1.3 5.5-6a4.7 4.7 0 0 0-1.3-3.2 4.3 4.3 0 0 0-.1-3.2s-1.1-.3-3.6 1.4a12.4 12.4 0 0 0-6.5 0C6.7 2.2 5.6 2.5 5.6 2.5a4.3 4.3 0 0 0-.1 3.2A4.7 4.7 0 0 0 4.2 9c0 4.7 2.8 5.7 5.5 6-.5.4-.8 1.1-.8 2V21",
                 "discord" => "M7 7c3-2 7-2 10 0l2 10c-3 2-11 2-14 0L7 7Z M9 12h.01 M15 12h.01 M8 8 6 5 M16 8l2-3",
                 "globe" => "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z M2 12h20 M12 2a15 15 0 0 1 0 20 M12 2a15 15 0 0 0 0 20",
                 "chevron-down" => "m6 9 6 6 6-6",
