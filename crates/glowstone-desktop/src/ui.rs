@@ -133,6 +133,9 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 PlatformChoice::Java => LoaderKind::Vanilla,
                 PlatformChoice::Horizon => LoaderKind::HorizonContent,
             };
+            if app.instance_version.trim().is_empty() {
+                app.instance_version = "stable".to_owned();
+            }
             app.notice = None;
         }
         Message::SelectLoader(loader) => {
