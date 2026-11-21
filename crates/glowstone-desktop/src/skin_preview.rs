@@ -43,7 +43,7 @@ struct CubeUv {
 }
 
 #[derive(Debug, Default)]
-struct PreviewInteraction {
+pub struct PreviewInteraction {
     dragging: bool,
     last_x: f32,
     rotation: f32,
