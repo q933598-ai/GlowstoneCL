@@ -274,8 +274,14 @@ async fn download_jar(
         .map_err(|error| format!("Не удалось создать папку mods: {error}"))?;
 
     // Prefixing the project ID avoids overwriting an unrelated JAR with the same name.
-    let file_name = format!("{project_id}-{original_name}");
-    let target = mods_dir.join(&file_name);
+    let mut file_name = format!("{project_id}-{original_name}");
+    let mut target = mods_dir.join(&file_name);
+    let mut suffix = 1_u32;
+    while target.exists() {
+        file_name = format!("{project_id}-{suffix}-{original_name}");
+        target = mods_dir.join(&file_name);
+        suffix += 1;
+    }
     let temporary = mods_dir.join(format!(".{file_name}.part"));
     let response = http.get(url).send().await
         .map_err(|error| format!("Не удалось скачать {original_name}: {error}"))?
@@ -329,10 +335,11 @@ async fn compatible_version(
     project_id: &str,
 ) -> Result<Value, String> {
     let versions = compatible_versions(http, instance, project_id).await?;
-    versions.iter()
+    let latest_release = versions.iter()
         .find(|item| item["version_type"].as_str() == Some("release"))
-        .cloned()
-        .or_else(|| versions.into_iter().next())
+        .cloned();
+    latest_release
+        .or_else(|| versions.first().cloned())
         .ok_or_else(|| format!(
             "У мода {project_id} нет версии для выбранной Minecraft и загрузчика."
         ))
