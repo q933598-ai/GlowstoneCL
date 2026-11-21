@@ -410,7 +410,9 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         }
         Message::SelectAccount(id) => {
             if app.data.accounts.iter().any(|account| account.id == id) {
-                app.data.settings.selected_account_id = Some(id);
+                app.data.settings.selected_account_id = Some(id.clone());
+                app.wardrobe_account_id = Some(id);
+                refresh_wardrobe(app);
                 app.notice = store::save(&app.data)
                     .err()
                     .map(|error| format!("Не удалось сохранить активный аккаунт: {error}"))
@@ -548,6 +550,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                             .find(|skin| skin.id == id)
                             .map(|skin| skin.name.clone())
                             .unwrap_or_default();
+                        refresh_skin_preview(app);
                         app.notice = Some("Активный скин выбран в локальном гардеробе этого аккаунта.".into());
                     }
                     Err(error) => app.notice = Some(error),
@@ -670,6 +673,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                                 app.wardrobe_skins = collection.skins;
                                 app.wardrobe_active_skin_id = collection.active_skin_id;
                                 app.wardrobe_selected_skin_id = Some(id);
+                                refresh_skin_preview(app);
                                 app.notice = Some("Скин загружен в официальный Minecraft-профиль. При следующем обновлении профиля он будет виден в игре и на других устройствах.".into());
                             }
                             Err(error) => app.notice = Some(format!("Скин отправлен в Minecraft, но не удалось обновить локальный выбор: {error}")),
@@ -722,6 +726,8 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     app.data.accounts.retain(|current| current.id != account_id);
                     app.data.accounts.push(login.account.clone());
                     app.data.settings.selected_account_id = Some(account_id.clone());
+                    app.wardrobe_account_id = Some(account_id.clone());
+                    refresh_wardrobe(app);
                     app.device_code = None;
 
                     let token_status = match store::store_refresh_token(&account_id, &login.refresh_token) {
@@ -799,6 +805,8 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     app.data.accounts.retain(|current| current.id != account_id);
                     app.data.accounts.push(account.clone());
                     app.data.settings.selected_account_id = Some(account_id.clone());
+                    app.wardrobe_account_id = Some(account_id.clone());
+                    refresh_wardrobe(app);
                     app.device_code = None;
 
                     let token_status = match store::store_refresh_token(&account_id, &refresh_token) {
@@ -1959,6 +1967,7 @@ fn refresh_wardrobe(app: &mut App) {
         app.wardrobe_active_skin_id = None;
         app.wardrobe_selected_skin_id = None;
         app.rename_skin_name.clear();
+        app.wardrobe_preview = None;
         return;
     };
     match store::load_skin_collection(&account.uuid) {
@@ -2170,7 +2179,7 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
         row![
             column![
                 text("Сохранённые скины").size(14).color(TEXT),
-                text(format!("{} файлов · только на этом устройстве", app.wardrobe_skins.len()))
+                text(format!("{} скинов в локальной коллекции", app.wardrobe_skins.len()))
                     .size(9).color(MUTED),
             ]
             .spacing(3),
