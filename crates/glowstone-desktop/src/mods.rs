@@ -506,6 +506,7 @@ enum InstallStep {
         project_id: String,
         project: Value,
         version: Value,
+        icon_url: Option<String>,
         dependency: bool,
     },
 }
@@ -591,6 +592,7 @@ pub async fn install(instance: GameInstance, project_id: String) -> Result<Vec<I
                     project_id: project_id.clone(),
                     project,
                     version: version.clone(),
+                    icon_url,
                     dependency,
                 });
 
@@ -630,7 +632,7 @@ pub async fn install(instance: GameInstance, project_id: String) -> Result<Vec<I
                     }
                 }
             }
-            InstallStep::Install { project_id, project, version, dependency } => {
+            InstallStep::Install { project_id, project, version, icon_url, dependency } => {
                 if manifest.mods.iter().any(|item| item.project_id == project_id) {
                     continue;
                 }
