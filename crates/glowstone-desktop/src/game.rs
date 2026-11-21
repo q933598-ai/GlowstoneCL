@@ -171,7 +171,8 @@ async fn launch_java(
 
 #[derive(Debug, Deserialize)]
 struct GithubRelease {
-    #[serde(default)]
+    /// GitHub's Releases API names the human-readable release title `name`.
+    #[serde(rename = "name")]
     title: String,
     tag_name: String,
     assets: Vec<GithubAsset>,
