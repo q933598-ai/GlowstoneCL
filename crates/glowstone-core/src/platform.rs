@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 pub enum GamePlatform {
     Java,
     Horizon,
+    /// Unofficial offline fork of Horizon; uses the player's existing Minecraft files.
+    HorizonOffline,
 }
 
 impl GamePlatform {
@@ -15,6 +17,7 @@ impl GamePlatform {
         match self {
             Self::Java => "Minecraft Java",
             Self::Horizon => "Horizon",
+            Self::HorizonOffline => "Horizon Offline",
         }
     }
 }
@@ -39,7 +42,7 @@ impl LoaderKind {
                 GamePlatform::Java,
                 Self::Vanilla | Self::Forge | Self::NeoForge | Self::Fabric | Self::Quilt
             ) | (
-                GamePlatform::Horizon,
+                GamePlatform::Horizon | GamePlatform::HorizonOffline,
                 Self::HorizonContent | Self::HorizonNative
             )
         )
