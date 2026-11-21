@@ -381,16 +381,20 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             app.auth_busy = true;
             let client_id = (!app.client_id.trim().is_empty())
                 .then(|| app.client_id.trim().to_owned());
-            if let Some(client_id) = &client_id {
-                // Persist a custom client id together with the account flow so later
-                // refreshes use the same Microsoft application after restarting the app.
-                app.data.settings.microsoft_client_id = client_id.clone();
+
+            // Keep the persisted setting in sync with the field. In particular,
+            // clearing a previously configured custom ID must switch back to the
+            // official Minecraft Launcher public client on this and later launches.
+            let persisted_client_id = client_id.clone().unwrap_or_default();
+            if app.data.settings.microsoft_client_id != persisted_client_id {
+                app.data.settings.microsoft_client_id = persisted_client_id;
                 if let Err(error) = store::save(&app.data) {
                     app.auth_busy = false;
-                    app.notice = Some(format!("Не удалось сохранить Microsoft Client ID: {error}"));
+                    app.notice = Some(format!("Не удалось сохранить настройки Microsoft: {error}"));
                     return iced::Task::none();
                 }
             }
+
             app.notice = Some("Открываю официальный вход Microsoft в браузере…".into());
             return iced::Task::perform(
                 auth::browser_login(client_id),
