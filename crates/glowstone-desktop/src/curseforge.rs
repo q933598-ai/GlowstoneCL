@@ -271,12 +271,15 @@ pub async fn install(
         .ok_or_else(|| "CurseForge не вернул прямую ссылку на файл.".to_owned())?;
     let parsed_url = reqwest::Url::parse(download_url)
         .map_err(|error| format!("CurseForge вернул некорректную ссылку: {error}"))?;
-    if parsed_url.scheme() != "https" || parsed_url.host_str().is_none()
-        || !parsed_url.username().is_empty() || parsed_url.password().is_some()
+    let download_host = parsed_url.host_str().unwrap_or_default().to_ascii_lowercase();
+    if parsed_url.scheme() != "https" || !parsed_url.username().is_empty()
+        || parsed_url.password().is_some()
+        || !(download_host == "forgecdn.net" || download_host.ends_with(".forgecdn.net"))
     {
-        return Err("CurseForge вернул небезопасную ссылку загрузки.".to_owned());
+        return Err("CurseForge вернул ссылку не на доверенный HTTPS CDN.".to_owned());
     }
 
+    // The API key is only forwarded to CurseForge's own CDN after its host was checked.
     let response = http.get(parsed_url).send().await
         .map_err(|error| format!("Не удалось скачать CurseForge-мод: {error}"))?
         .error_for_status()
