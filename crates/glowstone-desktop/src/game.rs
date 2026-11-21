@@ -590,10 +590,10 @@ async fn launch_java(
     let mut options = JavaLaunchOptions::new(data_root.clone(), version);
 
     if let Some((skin_path, model)) = offline_skin.as_ref() {
+        let game_dir = store::instance_directory(&instance.id.0)?;
+        remove_legacy_glowstone_offlineskins_mods(&game_dir);
         match ensure_offline_skin_injector(&data_root).await {
             Ok(agent_path) => {
-                let game_dir = store::instance_directory(&instance.id.0)?;
-                remove_legacy_glowstone_offlineskins_mods(&game_dir);
                 options.jvm_args.extend(offline_skin_jvm_args(
                     &agent_path,
                     skin_path,
