@@ -359,10 +359,27 @@ pub fn import_skin(
     Ok(collection)
 }
 
+/// Imports a remotely managed skin once and makes that entry the active local preview.
+pub fn import_skin_if_missing(
+    account_uuid: &str,
+    name: &str,
+    bytes: &[u8],
+    model: SkinModel,
+) -> Result<SkinCollection, String> {
+    let collection = load_skin_collection(account_uuid)?;
+    for skin in &collection.skins {
+        let path = skin_file_path(account_uuid, &skin.id)?;
+        if fs::read(path).is_ok_and(|stored| stored == bytes) {
+            return set_active_skin(account_uuid, &skin.id);
+        }
+    }
+    import_skin(account_uuid, name, bytes, model)
+}
+
 pub fn set_active_skin(account_uuid: &str, skin_id: &str) -> Result<SkinCollection, String> {
     let mut collection = load_skin_collection(account_uuid)?;
     if !collection.skins.iter().any(|skin| skin.id == skin_id) {
-        return Err("Скин не найден в этом offline-профиле.".to_owned());
+        return Err("Скин не найден в этом аккаунте.".to_owned());
     }
     let path = skin_file_path(account_uuid, skin_id)?;
     if !path.is_file() {
