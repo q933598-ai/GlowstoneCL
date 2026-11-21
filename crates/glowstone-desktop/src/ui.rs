@@ -1509,23 +1509,40 @@ fn main_content(app: &App) -> Element<'_, Message> {
 
 fn home_page(app: &App) -> Element<'_, Message> {
     let hero = hero_banner(app);
+
     let platforms = row![
         platform_card(app.art.clone(), PlatformChoice::Java, app.platform == PlatformChoice::Java),
-        platform_card(app.art.clone(), PlatformChoice::Horizon, app.platform == PlatformChoice::Horizon),
-        platform_card(app.art.clone(), PlatformChoice::HorizonOffline, app.platform == PlatformChoice::HorizonOffline),
+        platform_card(app.art.clone(), PlatformChoice::Horizon, matches!(app.platform, PlatformChoice::Horizon | PlatformChoice::HorizonOffline)),
     ]
-    .spacing(14)
+    .spacing(12)
     .width(Length::Fill);
 
-    let mut build_cards = row![]
-        .spacing(11)
-        .width(Length::Fill);
-    for (index, instance) in app.data.instances.iter().take(4).enumerate() {
+    // Prefer recently launched profiles, then append the rest of the user's library.
+    let mut home_instances: Vec<&GameInstance> = Vec::new();
+    for recent in &app.recent_plays {
+        if let Some(instance) = app.data.instances.iter().find(|item| item.id.0 == recent.instance_id) {
+            if !home_instances.iter().any(|existing| existing.id == instance.id) {
+                home_instances.push(instance);
+            }
+        }
+    }
+    for instance in app.data.instances.iter().rev() {
+        if !home_instances.iter().any(|existing| existing.id == instance.id) {
+            home_instances.push(instance);
+        }
+    }
+    home_instances.sort_by_key(|instance| !app.data.favorite_instance_ids.iter().any(|id| id == &instance.id.0));
+
+    let mut build_cards = row![].spacing(11).width(Length::Fill);
+    for (index, instance) in home_instances.iter().take(4).enumerate() {
+        let favorite = app.data.favorite_instance_ids.iter().any(|id| id == &instance.id.0);
+        let mod_count = store::installed_mod_count(&instance.id.0, instance.platform);
         build_cards = build_cards.push(pack_card(
             app.art.clone(),
-            instance.name.clone(),
-            format!("{} · {}", instance.game_version, loader_label(instance.loader)),
+            (*instance).clone(),
             index,
+            favorite,
+            mod_count,
         ));
     }
 
@@ -1558,7 +1575,8 @@ fn home_page(app: &App) -> Element<'_, Message> {
         row![
             column![
                 text("Твои сборки").size(16).color(TEXT),
-                text("Недавно созданные игровые профили").size(9).color(MUTED),
+                text("Реальные профили из библиотеки · избранное отображается первым")
+                    .size(9).color(MUTED),
             ]
             .spacing(2),
             Space::new().width(Length::Fill),
@@ -1571,13 +1589,9 @@ fn home_page(app: &App) -> Element<'_, Message> {
     ]
     .spacing(10);
 
-    let mut content = column![
-        hero,
-        platforms,
-        builds,
-    ]
-    .spacing(16)
-    .width(Length::Fill);
+    let mut content = column![hero, platforms, builds]
+        .spacing(16)
+        .width(Length::Fill);
 
     if let Some(notice) = &app.notice {
         content = content.push(
@@ -1587,50 +1601,58 @@ fn home_page(app: &App) -> Element<'_, Message> {
                 .style(|_| glass_style(CYAN_DARK, EDGE_BRIGHT)),
         );
     }
-
     content.into()
 }
 
 fn hero_banner(app: &App) -> Element<'_, Message> {
-    let play_message = app
-        .data
-        .settings
-        .selected_instance_id
-        .as_ref()
-        .filter(|id| app.data.instances.iter().any(|instance| &instance.id.0 == *id))
-        .cloned()
-        .map(Message::LaunchInstance)
+    let selected_instance = app.data.settings.selected_instance_id.as_ref()
+        .and_then(|id| app.data.instances.iter().find(|instance| &instance.id.0 == id));
+    let play_message = selected_instance
+        .map(|instance| Message::LaunchInstance(instance.id.0.clone()))
         .unwrap_or(Message::Navigate(Page::Instances));
+    let selected_label = selected_instance
+        .map(|instance| format!("Профиль запуска · {} · {}", instance.name, instance.game_version))
+        .unwrap_or_else(|| "Выбери профиль запуска в библиотеке сборок".to_owned());
+    let account_label = app.data.settings.selected_account_id.as_ref()
+        .and_then(|id| app.data.accounts.iter().find(|account| &account.id == id))
+        .map(|account| format!("Аккаунт · {}", account.name))
+        .unwrap_or_else(|| "Аккаунт не выбран".to_owned());
 
     let overlay = container(
         row![
             column![
                 text("GlowstoneCL").size(34).color(TEXT),
-                text("Твой Minecraft. Твои правила.").size(16).color(TEXT),
-                text("Java Edition и Horizon — в одной библиотеке.").size(11).color(MUTED),
-                Space::new().height(12),
+                text("Твой лаунчер для Minecraft и Horizon").size(15).color(TEXT),
+                text("Профили, моды и игровые аккаунты — в одном месте.")
+                    .size(10).color(MUTED),
+                Space::new().height(8),
+                row![
+                    icon("play", CYAN, 13.0),
+                    text(selected_label).size(9).color(TEXT),
+                ].spacing(7).align_y(Alignment::Center),
+                text(account_label).size(8).color(MUTED),
+                Space::new().height(7),
                 row![
                     primary_button(
-                        if app.launch_busy.is_some() { "Запускается..." } else { "Играть" },
+                        if app.launch_busy.is_some() { "Запуск..." } else { "Играть" },
                         play_message,
                     ),
-                    round_action("chevron-down", Message::Navigate(Page::Instances)),
-                    Space::new().width(Length::Fill),
-                    tonal_button("Настроить сборки", Message::Navigate(Page::Instances)),
+                    tonal_button("Выбрать профиль", Message::Navigate(Page::Instances)),
+                    quiet_button("Настройки сборки", Message::Navigate(Page::Instances)),
                 ]
-                .spacing(9)
+                .spacing(8)
                 .align_y(Alignment::Center),
             ]
             .spacing(3),
             Space::new().width(Length::Fill),
         ]
         .align_y(Alignment::Center)
-        .padding(25),
+        .padding(24),
     )
     .width(Length::Fill)
     .height(Length::Fill)
     .style(|_| container::Style {
-        background: Some(Color::from_rgba(0.025, 0.045, 0.085, 0.37).into()),
+        background: Some(Color::from_rgba(0.025, 0.045, 0.085, 0.47).into()),
         border: Border::default().rounded(18).width(1).color(EDGE),
         text_color: Some(TEXT),
         ..Default::default()
@@ -1640,17 +1662,17 @@ fn hero_banner(app: &App) -> Element<'_, Message> {
         stack![
             image::Image::new(app.art.clone())
                 .width(Length::Fill)
-                .height(Length::Fixed(265.0))
+                .height(Length::Fixed(258.0))
                 .content_fit(ContentFit::Cover)
                 .border_radius(18.0),
             overlay,
         ]
         .width(Length::Fill)
-        .height(Length::Fixed(265.0))
+        .height(Length::Fixed(258.0))
         .clip(true),
     )
     .width(Length::Fill)
-    .height(Length::Fixed(265.0))
+    .height(Length::Fixed(258.0))
     .style(|_| glass_style(PANEL, EDGE_BRIGHT))
     .into()
 }
@@ -1767,9 +1789,10 @@ fn tag_chip(label: &'static str) -> Element<'static, Message> {
 
 fn pack_card(
     art: image::Handle,
-    title: String,
-    subtitle: String,
+    instance: GameInstance,
     index: usize,
+    favorite: bool,
+    mod_count: usize,
 ) -> Element<'static, Message> {
     let crops = [
         Rectangle::<u32> { x: 0, y: 20, width: 300, height: 220 },
@@ -1777,40 +1800,45 @@ fn pack_card(
         Rectangle::<u32> { x: 360, y: 60, width: 330, height: 220 },
         Rectangle::<u32> { x: 80, y: 160, width: 400, height: 210 },
     ];
+    let id = instance.id.0.clone();
+    let title = instance.name.clone();
+    let subtitle = format!("Minecraft {} · {}", instance.game_version, loader_label(instance.loader));
     let crop = crops[index.min(3)];
+    let favorite_icon = if favorite { CYAN } else { MUTED };
 
     container(
-        stack![
+        column![
             image::Image::new(art)
                 .crop(crop)
                 .width(Length::Fill)
-                .height(Length::Fixed(140.0))
+                .height(Length::Fixed(86.0))
                 .content_fit(ContentFit::Cover)
-                .border_radius(13.0),
-            container(
-                column![
-                    Space::new().height(Length::Fill),
-                    text(title).size(10).color(TEXT),
-                    text(subtitle).size(8).color(MUTED),
-                ]
-                .spacing(3)
-                .padding(10),
-            )
-            .width(Length::Fill)
-            .height(Length::Fixed(140.0))
-            .style(|_| container::Style {
-                background: Some(Color::from_rgba(0.015, 0.025, 0.045, 0.55).into()),
-                border: Border::default().rounded(13).color(EDGE),
-                text_color: Some(TEXT),
-                ..Default::default()
-            }),
+                .border_radius(12.0),
+            row![
+                text(title).size(10).color(TEXT),
+                Space::new().width(Length::Fill),
+                button(icon("star", favorite_icon, 14.0))
+                    .on_press(Message::ToggleFavorite(id.clone()))
+                    .padding(5)
+                    .style(button::text),
+            ]
+            .align_y(Alignment::Center),
+            text(subtitle).size(8).color(MUTED),
+            row![
+                icon("puzzle", PURPLE, 11.0),
+                text(format!("{mod_count} модов")).size(8).color(MUTED),
+                Space::new().width(Length::Fill),
+                button(row![icon("play", CYAN, 11.0), text("Играть").size(8).color(CYAN)].spacing(5))
+                    .on_press(Message::LaunchInstance(id))
+                    .padding([5, 8])
+                    .style(button::text),
+            ]
+            .align_y(Alignment::Center),
         ]
-        .width(Length::Fill)
-        .height(Length::Fixed(140.0))
-        .clip(true),
+        .spacing(5)
+        .padding(9),
     )
-    .width(Length::Fill)
-    .height(Length::Fixed(140.0))
+    .width(Length::FillPortion(1))
     .style(|_| glass_style(PANEL, EDGE))
     .into()
 }
