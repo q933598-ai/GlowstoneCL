@@ -6,7 +6,6 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 
@@ -27,7 +26,6 @@ use crate::auth;
 use crate::store::{self, AccountKind, AccountProfile};
 use glowstone_core::{GameInstance, GamePlatform, LoaderKind};
 
-const HORIZON_REPOSITORY: &str = "horizon-rust/horizon";
 const HORIZON_NIGHTLY_API: &str =
     "https://api.github.com/repos/horizon-rust/horizon/releases/tags/nightly";
 const HORIZON_RELEASE_KEY: &str = "MU4oiIQcCxkZvbwSjjXs7SySCuM6ywRQ3nGaJYZG0gw=";
