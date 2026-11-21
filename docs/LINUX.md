@@ -28,7 +28,7 @@ The default Linux Cargo features enable both backends:
 
 ### Arch Linux / CachyOS
 
-    sudo pacman -S --needed wayland libxkbcommon libx11 libxrandr libxinerama libxcursor libxi vulkan-icd-loader
+    sudo pacman -S --needed wayland libxkbcommon libx11 libxrandr libxinerama libxcursor libxi vulkan-icd-loader inter-font
 
 ### Fedora
 
@@ -39,3 +39,14 @@ The default Linux Cargo features enable both backends:
     sudo apt install libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libvulkan1
 
 Exact package names can differ between distributions and graphics drivers.
+
+
+## Typography
+
+The Linux UI uses Inter. Install it on CachyOS/Arch:
+
+    sudo pacman -S --needed inter-font
+
+Then refresh the font cache (usually the package hook does this automatically):
+
+    fc-cache -f
