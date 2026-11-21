@@ -244,7 +244,7 @@ const MAX_SKIN_BYTES: usize = 2 * 1024 * 1024;
 
 fn skin_account_directory(account_uuid: &str) -> Result<PathBuf, String> {
     let uuid = Uuid::parse_str(account_uuid)
-        .map_err(|_| "Некорректный UUID offline-аккаунта.".to_owned())?;
+        .map_err(|_| "Некорректный UUID игрового аккаунта.".to_owned())?;
     Ok(app_data_dir()?.join("skins").join(uuid.to_string()))
 }
 
@@ -422,6 +422,56 @@ pub fn delete_skin(account_uuid: &str, skin_id: &str) -> Result<SkinCollection, 
     }
     save_skin_collection(account_uuid, &collection)?;
     Ok(collection)
+}
+
+
+/// Decodes a stored skin into RGBA pixels for the 3D wardrobe preview.
+/// The decoded texture is cached by the UI, so this is not repeated on every redraw.
+pub fn load_skin_pixels(account_uuid: &str, skin_id: &str) -> Result<std::sync::Arc<Vec<[u8; 4]>>, String> {
+    let path = skin_file_path(account_uuid, skin_id)?;
+    let bytes = fs::read(&path)
+        .map_err(|error| format!("Не удалось прочитать PNG скина: {error}"))?;
+    let mut decoder = png::Decoder::new(Cursor::new(bytes));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder
+        .read_info()
+        .map_err(|error| format!("Не удалось декодировать PNG скина: {error}"))?;
+    let mut buffer = vec![0; reader.output_buffer_size()];
+    let output = reader
+        .next_frame(&mut buffer)
+        .map_err(|error| format!("Не удалось декодировать PNG скина: {error}"))?;
+    if output.width != 64 || !matches!(output.height, 32 | 64) {
+        return Err("Для 3D-предпросмотра нужен скин 64×64 или 64×32.".to_owned());
+    }
+
+    let mut pixels = Vec::with_capacity((output.width * output.height) as usize);
+    let decoded = &buffer[..output.buffer_size()];
+    match output.color_type {
+        png::ColorType::Rgba => {
+            for px in decoded.chunks_exact(4) {
+                pixels.push([px[0], px[1], px[2], px[3]]);
+            }
+        }
+        png::ColorType::Rgb => {
+            for px in decoded.chunks_exact(3) {
+                pixels.push([px[0], px[1], px[2], 255]);
+            }
+        }
+        png::ColorType::Grayscale => {
+            for value in decoded {
+                pixels.push([*value, *value, *value, 255]);
+            }
+        }
+        png::ColorType::GrayscaleAlpha => {
+            for px in decoded.chunks_exact(2) {
+                pixels.push([px[0], px[0], px[0], px[1]]);
+            }
+        }
+        png::ColorType::Indexed => {
+            return Err("Не удалось преобразовать палитровый PNG скина.".to_owned());
+        }
+    }
+    Ok(std::sync::Arc::new(pixels))
 }
 
 pub fn skin_image_path(account_uuid: &str, skin_id: &str) -> Result<PathBuf, String> {
