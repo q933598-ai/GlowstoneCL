@@ -401,7 +401,7 @@ pub fn rename_skin(
         .skins
         .iter_mut()
         .find(|skin| skin.id == skin_id)
-        .ok_or_else(|| "Скин не найден в этом offline-профиле.".to_owned())?;
+        .ok_or_else(|| "Скин не найден в коллекции этого аккаунта.".to_owned())?;
     skin.name = new_name;
     save_skin_collection(account_uuid, &collection)?;
     Ok(collection)
@@ -417,7 +417,7 @@ pub fn set_skin_model(
         .skins
         .iter_mut()
         .find(|skin| skin.id == skin_id)
-        .ok_or_else(|| "Скин не найден в этом offline-профиле.".to_owned())?;
+        .ok_or_else(|| "Скин не найден в коллекции этого аккаунта.".to_owned())?;
     skin.model = model;
     save_skin_collection(account_uuid, &collection)?;
     Ok(collection)
