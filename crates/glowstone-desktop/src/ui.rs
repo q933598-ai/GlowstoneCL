@@ -813,6 +813,16 @@ fn home_page(app: &App) -> Element<'_, Message> {
 }
 
 fn hero_banner(app: &App) -> Element<'_, Message> {
+    let play_message = app
+        .data
+        .settings
+        .selected_instance_id
+        .as_ref()
+        .filter(|id| app.data.instances.iter().any(|instance| &instance.id.0 == *id))
+        .cloned()
+        .map(Message::LaunchInstance)
+        .unwrap_or(Message::Navigate(Page::Instances));
+
     let overlay = container(
         row![
             column![
@@ -821,8 +831,10 @@ fn hero_banner(app: &App) -> Element<'_, Message> {
                 text("Java Edition и Horizon — в одной библиотеке.").size(11).color(MUTED),
                 Space::new().height(12),
                 row![
-                    primary_button("Играть", Message::Info("Выбери установленную сборку в разделе «Мои сборки»."))
-                        ,
+                    primary_button(
+                        if app.launch_busy.is_some() { "Запускается..." } else { "Играть" },
+                        play_message,
+                    ),
                     round_action("chevron-down", Message::Navigate(Page::Instances)),
                     Space::new().width(Length::Fill),
                     tonal_button("Настроить сборки", Message::Navigate(Page::Instances)),
