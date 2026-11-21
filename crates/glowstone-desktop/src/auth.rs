@@ -13,6 +13,67 @@ const DEVICE_CODE_ENDPOINT: &str =
 const TOKEN_ENDPOINT: &str =
     "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
 
+#[derive(Clone)]
+pub struct BrowserLoginResult {
+    pub account: AccountProfile,
+    pub refresh_token: String,
+}
+
+impl std::fmt::Debug for BrowserLoginResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BrowserLoginResult")
+            .field("account", &self.account)
+            .field("refresh_token", &"<redacted>")
+            .finish()
+    }
+}
+
+/// Browser-based Microsoft sign-in. With no custom Client ID, CrustCore uses
+/// the official Minecraft Launcher public client ID; otherwise the saved
+/// public client ID is used. The returned refresh token is never logged.
+pub async fn browser_login(client_id: Option<String>) -> Result<BrowserLoginResult, String> {
+    let authenticator = match client_id.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
+        Some(client_id) => Authenticator::with_client_id(client_id.to_owned()),
+        None => Authenticator::new(),
+    }
+    .map_err(|error| format!("Не удалось инициализировать Microsoft: {error}"))?;
+
+    let flow = authenticator
+        .device_code()
+        .await
+        .map_err(|error| format!("Microsoft не выдал код входа: {error}"))?;
+    let verification_url = flow.verification_uri_complete();
+
+    webbrowser::open(&verification_url).map_err(|error| {
+        format!(
+            "Не удалось открыть браузер Microsoft: {error}. Открой ссылку вручную: {verification_url}"
+        )
+    })?;
+
+    let account = flow
+        .wait()
+        .await
+        .map_err(|error| format!("Вход Microsoft не завершился: {error}"))?;
+    let refresh_token = account
+        .refresh_token
+        .clone()
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| "Microsoft не вернул refresh token. Попробуй войти ещё раз.".to_owned())?;
+
+    let uuid = account.uuid.replace('-', "").to_ascii_lowercase();
+    let account = AccountProfile {
+        id: format!("microsoft:{uuid}"),
+        name: account.name,
+        uuid,
+        kind: AccountKind::Microsoft,
+    };
+
+    Ok(BrowserLoginResult {
+        account,
+        refresh_token,
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct DeviceCodePrompt {
     pub device_code: String,
@@ -398,12 +459,12 @@ pub async fn refresh_game_account(
     refresh_token: String,
 ) -> Result<GameAccount, String> {
     let client_id = client_id.trim().to_owned();
-    if client_id.is_empty() {
-        return Err("Сначала укажи Microsoft Client ID в разделе «Аккаунты».".to_owned());
+    let authenticator = if client_id.is_empty() {
+        Authenticator::new()
+    } else {
+        Authenticator::with_client_id(client_id.clone())
     }
-
-    let authenticator = Authenticator::with_client_id(client_id.clone())
-        .map_err(|error| format!("Не удалось инициализировать Microsoft: {error}"))?;
+    .map_err(|error| format!("Не удалось инициализировать Microsoft: {error}"))?;
 
     // An empty, expired access token forces CrustCore to exchange the stored
     // Microsoft refresh token for a fresh Xbox/XSTS/Minecraft session.
@@ -417,7 +478,7 @@ pub async fn refresh_game_account(
         meta: AccountMeta::xbox(0, Ownership::Unknown, Vec::new()),
         xbox_account: None,
         profile: GameAccountProfile::default(),
-        client_id: Some(client_id),
+        client_id: (!client_id.is_empty()).then_some(client_id),
         user_info: None,
     };
 
