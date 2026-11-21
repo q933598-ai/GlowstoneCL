@@ -1,7 +1,7 @@
 use iced::widget::{
     button, column, container, row, rule, scrollable, text, Space,
 };
-use iced::{Alignment, Border, Color, Element, Length, Theme};
+use iced::{Alignment, Border, Color, Element, Length};
 
 const BG: Color = Color::from_rgb8(12, 17, 25);
 const SIDEBAR: Color = Color::from_rgb8(14, 20, 29);
@@ -80,22 +80,27 @@ pub fn update(app: &mut App, message: Message) {
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    row![
-        container(sidebar(app))
-            .width(Length::Fixed(236.0))
-            .height(Length::Fill)
-            .padding([24, 16])
-            .style(|_| panel_style(SIDEBAR, Color::TRANSPARENT)),
-        column![
-            top_bar(app.page),
-            scrollable(page_content(app))
+    container(
+        row![
+            container(sidebar(app))
+                .width(Length::Fixed(236.0))
                 .height(Length::Fill)
-                .width(Length::Fill),
+                .padding([24, 16])
+                .style(|_| panel_style(SIDEBAR, Color::TRANSPARENT)),
+            column![
+                top_bar(app.page),
+                scrollable(page_content(app))
+                    .height(Length::Fill)
+                    .width(Length::Fill),
+            ]
+            .height(Length::Fill)
+            .width(Length::Fill),
         ]
-        .height(Length::Fill)
-        .width(Length::Fill),
-    ]
+        .height(Length::Fill),
+    )
+    .width(Length::Fill)
     .height(Length::Fill)
+    .style(|_| panel_style(BG, Color::TRANSPARENT))
     .into()
 }
 
@@ -104,7 +109,8 @@ fn sidebar(app: &App) -> Element<'_, Message> {
         container(text("✦").size(23).color(ACCENT))
             .width(42)
             .height(42)
-            .center(Length::Fill)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
             .style(|_| panel_style(ACCENT_DARK, Color::TRANSPARENT)),
         column![
             text("GLOWSTONE").size(16).color(TEXT),
@@ -154,7 +160,8 @@ fn sidebar(app: &App) -> Element<'_, Message> {
             container(text("U").size(13).color(ACCENT))
                 .width(34)
                 .height(34)
-                .center(Length::Fill)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center)
                 .style(|_| panel_style(ACCENT_DARK, Color::TRANSPARENT)),
             column![
                 text("Локальный профиль").size(11).color(TEXT),
@@ -298,7 +305,8 @@ fn home_page(app: &App) -> Element<'_, Message> {
             )
             .width(Length::FillPortion(3))
             .height(190)
-            .center(Length::Fill)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
             .style(|_| panel_style(Color::from_rgb8(19, 51, 67), Color::TRANSPARENT)),
         ]
         .spacing(20)
