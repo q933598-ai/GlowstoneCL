@@ -5,7 +5,8 @@
 GlowstoneCL is a desktop launcher for two separate game platforms:
 
 - **Minecraft Java Edition** — Vanilla, Forge, NeoForge, Fabric and Quilt.
-- **Horizon** — the Rust-based Minecraft runtime, launched through Horizon's official Launch API.
+- **Horizon** — the official Rust-based Minecraft runtime, launched through Horizon's Launch API.
+- **Horizon Offline** — a separately signed, unofficial offline fork for local/offline profiles, currently pinned to Minecraft 26.3 and Java 25.
 
 The project targets **Windows and Linux**. On Linux, the desktop app supports native Wayland and X11 backends; XWayland is not required by the Wayland backend.
 
@@ -17,11 +18,13 @@ The `test/glowstonecl` branch includes:
 - local instance creation, selection, isolated workspaces and safe deletion to a local trash directory;
 - **official Minecraft Java installation and launch** through CrustCore: Mojang version metadata, client files, libraries, assets and matching Java runtimes are downloaded as needed;
 - first-launch installation and launch of Vanilla, Fabric, Quilt, Forge and NeoForge profiles;
-- **Horizon installation and launch**: the latest supported official Nightly is downloaded, its version-bound Ed25519 signature and archive SHA-256 are checked, and the binary's Launch API is queried before use;
-- automatic download of the Mojang game files and Java version required by Horizon, followed by resource preparation and launch through `--session-stdin`;
+- **Horizon installation and launch**: the selected official game release (Nightly or tagged version) is downloaded, its Ed25519 signature and archive SHA-256 are checked, and the binary's Launch API is queried before use;
+- **Horizon Offline** installation and launch from a separate signed fork, without Microsoft session injection; it imports existing local Minecraft 26.3 files from .minecraft or Prism/MultiMC and does not download the client jar for an offline profile;
+- Java version catalogue from Mojang, including `release`, `snapshot`, `old_beta` and `old_alpha`; Horizon catalogues from the official and offline-fork GitHub game releases, with pagination and install-by-selected-release ID;
+- automatic download of the Mojang game files and Java version required by official Horizon, followed by resource preparation and launch through `--session-stdin`;
 - Microsoft browser sign-in through CrustCore using the official Minecraft Launcher public client by default (optional custom Client ID), followed by Xbox Live, XSTS and Minecraft Services, including ownership / Game Pass checks;
 - Microsoft refresh-token storage in the operating system credential store, with session refresh before launching a game;
-- offline profiles for Java offline-mode play.
+- offline profiles for Java offline-mode play and the separate Horizon Offline fork.
 
 The Horizon game binary is currently provided for **Linux x86_64** and **Windows x64**. The Java backend supports the platform/runtime combinations provided by CrustCore.
 
@@ -32,7 +35,7 @@ The Horizon game binary is currently provided for **Linux x86_64** and **Windows
 - a detailed download queue/progress view and log/crash-report browser;
 - import/export of complete instances and packaged installers for GlowstoneCL.
 
-Java and Horizon remain separate runtimes: Java JAR mods are not automatically Horizon mods.
+Java, official Horizon and Horizon Offline remain separate runtimes: Java JAR mods are not automatically Horizon mods, and the offline fork is not interchangeable with the official client.
 
 ## Requirements
 
@@ -67,7 +70,7 @@ On Linux, application state and game files are stored under:
 
 The `state.json` file contains instance metadata, local account profiles and the Microsoft public Client ID. Microsoft refresh tokens are stored separately through the platform credential store (Secret Service on Linux, Windows Credential Manager on Windows). Short-lived Minecraft access tokens are held in memory and are not written to `state.json`.
 
-Each instance has a separate game directory under `instances/<uuid>/`. Java and Horizon use separate launch paths and loader models.
+Each instance has a separate game directory under `instances/<uuid>/`. Java, official Horizon and Horizon Offline use separate launch paths, caches and loader models.
 
 ## Microsoft sign-in setup
 
@@ -87,8 +90,9 @@ A custom Microsoft Application (client) ID is optional. GlowstoneCL uses CrustCo
 |---|---|
 | Minecraft Java download and launch | Implemented through CrustCore |
 | Vanilla, Fabric, Quilt, Forge and NeoForge | Implemented in the launch backend |
-| Horizon runtime and Launch API | Implemented for Linux x86_64 and Windows x64 |
-| Microsoft Device Code sign-in and token refresh | Implemented |
+| Official Horizon runtime and Launch API | Implemented for Linux x86_64 and Windows x64 |
+| Horizon Offline fork | Implemented as a separate runtime; requires local Minecraft 26.3 + Java 25 |
+| Microsoft browser sign-in (official client by default) and token refresh | Implemented |
 | Modrinth / CurseForge catalogues | Planned |
 | Mod and modpack installation / updates | Planned |
 | Download queue, detailed progress and logs UI | Planned |
