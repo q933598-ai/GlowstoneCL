@@ -3,7 +3,7 @@
 GlowstoneCL supports two account types:
 
 - **Offline profile** — a local Java profile with a deterministic offline UUID. It is not a Microsoft login and cannot authenticate to online-mode servers.
-- **Microsoft account** — Device Code Flow followed by Xbox Live, XSTS and Minecraft Services authentication. GlowstoneCL verifies that a Minecraft profile is returned before adding the account.
+- **Microsoft account** — Device Code Flow followed by Xbox Live, XSTS and Minecraft Services authentication. GlowstoneCL checks the Minecraft Java entitlement and profile before adding the account.
 
 ## Register a Microsoft public client
 
@@ -26,10 +26,11 @@ GlowstoneCL uses the Microsoft consumers authority and requests the XboxLive.sig
 3. Click **Войти через Microsoft**.
 4. Open the displayed verification page and enter the device code.
 5. After approving the login, return to GlowstoneCL and click **Я подтвердил вход**.
-6. GlowstoneCL exchanges the Microsoft token through Xbox Live and XSTS, then requests the Minecraft Java profile.
-7. The account is added only after Minecraft Services returns a profile.
+6. GlowstoneCL polls Microsoft automatically until approval or code expiry; you do not need to click the check button repeatedly.
+7. GlowstoneCL exchanges the Microsoft token through Xbox Live and XSTS, checks the Minecraft Java entitlement, then requests the Minecraft Java profile.
+8. The account is added only after the entitlement and profile checks succeed, and it becomes the selected account.
 
-The Microsoft refresh token is written to the platform credential store (Secret Service on Linux or Windows Credential Manager). Account display data is stored in the GlowstoneCL state file. If the platform credential store is unavailable, the profile can still appear in the account list, but the UI warns that a future sign-in may be needed.
+The Microsoft refresh token is written to the platform credential store (Secret Service on Linux or Windows Credential Manager). Account display data and the selected account ID are stored in the GlowstoneCL state file. If the platform credential store is unavailable, the profile can still appear in the account list, but the UI warns that a future sign-in may be needed.
 
 ## Common issues
 
