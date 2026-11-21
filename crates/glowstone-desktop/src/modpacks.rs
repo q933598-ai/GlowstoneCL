@@ -448,7 +448,7 @@ pub async fn install_project(project_id: String, project_name: String) -> Result
         let title = format!("{base} · {version_name}");
         title.chars().take(64).collect::<String>()
     };
-    let instance = store::create_instance(
+    let mut instance = store::create_instance(
         instance_name,
         minecraft,
         GamePlatform::Java,
@@ -461,18 +461,23 @@ pub async fn install_project(project_id: String, project_name: String) -> Result
             return Err(error);
         }
     };
+
     let result = async {
         let (installed, loader_version) = install_index_files(
-            &http, &bytes, &game_directory, &minecraft, loader,
+            &http, &bytes, &game_directory, &instance.game_version, loader,
         ).await?;
         if installed == 0 {
             return Err("В этом модпаке нет клиентских файлов для установки.".to_owned());
         }
+
+        instance.loader_version = Some(loader_version.clone());
+        store::save_instance_metadata(&instance)?;
+
         let pack_manifest = serde_json::json!({
             "source": "modrinth",
             "project_id": project_id,
             "version": version_name,
-            "minecraft": minecraft,
+            "minecraft": instance.game_version,
             "loader": format!("{loader:?}"),
             "loader_version": loader_version,
             "installed_files": installed,
