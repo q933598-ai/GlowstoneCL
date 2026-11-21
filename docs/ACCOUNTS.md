@@ -27,7 +27,7 @@ GlowstoneCL uses the Microsoft consumers authority and requests `XboxLive.signin
 2. Enter and save the Application (client) ID.
 3. Click **Войти через Microsoft**.
 4. Open the verification page and enter the displayed device code.
-5. After approving sign-in, return to GlowstoneCL. The launcher polls automatically until authorization succeeds or the code expires.
+5. Return to GlowstoneCL and click **Проверить вход**. The launcher then polls automatically at Microsoft's required interval until authorization succeeds or the code expires.
 6. GlowstoneCL exchanges the Microsoft token through Xbox Live and XSTS, checks supported Java entitlement products, and retrieves the Minecraft Java profile.
 7. The account is added only after authentication and profile checks succeed, and becomes the selected account.
 
