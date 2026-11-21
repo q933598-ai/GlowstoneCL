@@ -9,6 +9,7 @@ use glowstone_core::{GameInstance, GamePlatform, InstanceState, LoaderKind};
 
 use crate::auth::{self, DeviceCodePrompt, PollResult};
 use crate::game::{self, LaunchOutcome};
+use crate::mods;
 use crate::store::{self, AccountKind, AccountProfile, PersistedState};
 
 const BG: Color = Color::from_rgb8(10, 15, 26);
@@ -69,6 +70,12 @@ pub enum Message {
     VersionSelected(String),
     ReloadVersionCatalog,
     VersionCatalogLoaded(GamePlatform, Result<Vec<game::VersionChoice>, String>),
+    SearchMods,
+    ModTargetSelected(String),
+    ModsSearched(String, Result<Vec<mods::ModProject>, String>),
+    InstallMod(String),
+    ModInstallFinished(String, Result<Vec<mods::InstalledMod>, String>),
+    RemoveMod(String, String),
     CreateInstance,
     SelectInstance(String),
     LaunchInstance(String),
@@ -125,6 +132,12 @@ pub struct App {
     version_platform: Option<GamePlatform>,
     versions_busy: bool,
     versions_error: Option<String>,
+    mod_target_instance: Option<String>,
+    mod_results: Vec<mods::ModProject>,
+    installed_mods: Vec<mods::InstalledMod>,
+    mods_busy: bool,
+    mods_busy_project: Option<String>,
+    mods_error: Option<String>,
     offline_name: String,
     client_id: String,
     device_code: Option<DeviceCodePrompt>,
@@ -168,6 +181,12 @@ impl Default for App {
             version_platform: None,
             versions_busy: false,
             versions_error: None,
+            mod_target_instance: None,
+            mod_results: Vec::new(),
+            installed_mods: Vec::new(),
+            mods_busy: false,
+            mods_busy_project: None,
+            mods_error: None,
             offline_name: String::new(),
             client_id: data.settings.microsoft_client_id.clone(),
             device_code: None,
@@ -215,6 +234,30 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     move |result| Message::VersionCatalogLoaded(platform, result),
                 );
             }
+            if page == Page::Catalog {
+                let selected = app.data.settings.selected_instance_id.as_deref()
+                    .and_then(|id| app.data.instances.iter().find(|item| item.id.0 == id))
+                    .filter(|item| item.platform == GamePlatform::Java && !matches!(item.loader, LoaderKind::Vanilla))
+                    .cloned()
+                    .or_else(|| app.data.instances.iter()
+                        .find(|item| item.platform == GamePlatform::Java && !matches!(item.loader, LoaderKind::Vanilla))
+                        .cloned());
+                app.mod_target_instance = selected.as_ref().map(|item| item.id.0.clone());
+                app.mod_results.clear();
+                app.mods_error = None;
+                app.installed_mods = selected.as_ref()
+                    .and_then(|item| mods::installed(&item.id.0).ok())
+                    .unwrap_or_default();
+                if let Some(instance) = selected {
+                    let target_id = instance.id.0.clone();
+                    app.mods_busy = true;
+                    return iced::Task::perform(
+                        mods::search(instance, app.search.clone()),
+                        move |result| Message::ModsSearched(target_id, result),
+                    );
+                }
+                app.mods_error = Some("Сначала создай сборку Minecraft Java с Fabric, Forge, NeoForge или Quilt.".to_owned());
+            }
         }
         Message::SelectPlatform(platform) => {
             app.platform = platform;
@@ -244,6 +287,107 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             app.search = value;
             app.page = Page::Catalog;
             app.notice = None;
+        }
+        Message::SearchMods => {
+            let Some(target_id) = app.mod_target_instance.clone() else {
+                app.mods_error = Some("Сначала выбери сборку Minecraft Java с мод-загрузчиком.".to_owned());
+                return iced::Task::none();
+            };
+            let Some(instance) = app.data.instances.iter().find(|item| item.id.0 == target_id).cloned() else {
+                app.mods_error = Some("Выбранная сборка больше не существует.".to_owned());
+                return iced::Task::none();
+            };
+            app.mods_busy = true;
+            app.mods_error = None;
+            return iced::Task::perform(
+                mods::search(instance, app.search.clone()),
+                move |result| Message::ModsSearched(target_id, result),
+            );
+        }
+        Message::ModTargetSelected(target_id) => {
+            let Some(instance) = app.data.instances.iter()
+                .find(|item| item.id.0 == target_id
+                    && item.platform == GamePlatform::Java
+                    && !matches!(item.loader, LoaderKind::Vanilla))
+                .cloned()
+            else {
+                app.mods_error = Some("Нужна Java-сборка с Fabric, Forge, NeoForge или Quilt.".to_owned());
+                return iced::Task::none();
+            };
+            app.mod_target_instance = Some(target_id.clone());
+            app.installed_mods = mods::installed(&target_id).unwrap_or_default();
+            app.mod_results.clear();
+            app.mods_busy = true;
+            app.mods_error = None;
+            return iced::Task::perform(
+                mods::search(instance, app.search.clone()),
+                move |result| Message::ModsSearched(target_id, result),
+            );
+        }
+        Message::ModsSearched(target_id, result) => {
+            if app.mod_target_instance.as_deref() == Some(target_id.as_str()) {
+                app.mods_busy = false;
+                match result {
+                    Ok(results) => {
+                        app.mod_results = results;
+                        app.mods_error = None;
+                    }
+                    Err(error) => {
+                        app.mod_results.clear();
+                        app.mods_error = Some(error);
+                    }
+                }
+            }
+        }
+        Message::InstallMod(project_id) => {
+            if app.mods_busy {
+                app.notice = Some("Дождись завершения текущего поиска или установки.".to_owned());
+                return iced::Task::none();
+            }
+            let Some(target_id) = app.mod_target_instance.clone() else {
+                app.notice = Some("Сначала выбери Java-сборку.".to_owned());
+                return iced::Task::none();
+            };
+            let Some(instance) = app.data.instances.iter().find(|item| item.id.0 == target_id).cloned() else {
+                app.notice = Some("Выбранная сборка не найдена.".to_owned());
+                return iced::Task::none();
+            };
+            app.mods_busy = true;
+            app.mods_busy_project = Some(project_id.clone());
+            app.notice = Some("Скачиваю мод и проверяю контрольную сумму…".to_owned());
+            return iced::Task::perform(
+                mods::install(instance, project_id),
+                move |result| Message::ModInstallFinished(target_id, result),
+            );
+        }
+        Message::ModInstallFinished(target_id, result) => {
+            if app.mod_target_instance.as_deref() == Some(target_id.as_str()) {
+                app.mods_busy = false;
+                app.mods_busy_project = None;
+                match result {
+                    Ok(installed) => {
+                        let added = installed.iter().filter(|item| item.dependency).count();
+                        app.installed_mods = installed;
+                        app.notice = Some(if added > 0 {
+                            format!("Мод установлен. Также добавлено обязательных зависимостей: {added}.")
+                        } else {
+                            "Мод успешно установлен в выбранную сборку.".to_owned()
+                        });
+                    }
+                    Err(error) => app.notice = Some(error),
+                }
+            }
+        }
+        Message::RemoveMod(target_id, project_id) => {
+            if app.mod_target_instance.as_deref() == Some(target_id.as_str()) {
+                match mods::remove(&target_id, &project_id) {
+                    Ok(installed) => {
+                        app.installed_mods = installed;
+                        app.notice = Some("Мод удалён из этой сборки.".to_owned());
+                    }
+                    Err(error) => app.notice = Some(error),
+                }
+            }
         }
         Message::InstanceNameChanged(value) => app.instance_name = value,
         Message::InstanceVersionChanged(value) => app.instance_version = value,
@@ -1149,6 +1293,7 @@ fn top_bar(app: &App) -> Element<'_, Message> {
             icon("search", MUTED, 18.0),
             text_input("Поиск по сборкам, модам и модпакам...", &app.search)
                 .on_input(Message::SearchChanged)
+                .on_submit(Message::SearchMods)
                 .size(12)
                 .padding([10, 8])
                 .width(Length::Fill),
@@ -1194,7 +1339,7 @@ fn main_content(app: &App) -> Element<'_, Message> {
         Page::Accounts => accounts_page(app),
         Page::Wardrobe => wardrobe_page(app),
         Page::Settings => settings_page(app),
-        Page::Catalog => catalog_page(),
+        Page::Catalog => catalog_page(app),
         Page::Modpacks => modpacks_page(),
         Page::Downloads => downloads_page(),
     }
@@ -2560,14 +2705,198 @@ fn settings_card(
     .into()
 }
 
-fn catalog_page() -> Element<'static, Message> {
-    column![
-        section_header("ИСТОЧНИКИ КОНТЕНТА", "Каталоги будут фильтроваться по платформе и версии игры."),
-        source_card("MODRINTH", "Моды, модпаки, шейдеры и ресурспаки", "API ещё не подключён", CYAN),
-        source_card("CURSEFORGE", "Моды и готовые сборки", "Требуется официальная API-интеграция", PURPLE),
-    ]
-    .spacing(14)
-    .into()
+fn catalog_page(app: &App) -> Element<'_, Message> {
+    let selected = app.mod_target_instance.as_deref()
+        .and_then(|id| app.data.instances.iter().find(|item| item.id.0 == id));
+    let mut targets = row![text("СБОРКА").size(9).color(MUTED)].spacing(7).align_y(Alignment::Center);
+    let mut target_count = 0usize;
+    for instance in app.data.instances.iter().filter(|item| {
+        item.platform == GamePlatform::Java && !matches!(item.loader, LoaderKind::Vanilla)
+    }) {
+        target_count += 1;
+        let active = app.mod_target_instance.as_deref() == Some(instance.id.0.as_str());
+        let label = format!("{} · {} · {}", instance.name, instance.game_version, loader_label(instance.loader));
+        targets = targets.push(
+            button(text(label).size(9).color(if active { CYAN } else { TEXT }))
+                .on_press(Message::ModTargetSelected(instance.id.0.clone()))
+                .padding([8, 11])
+                .style(move |theme, status| {
+                    let mut style = button::secondary(theme, status);
+                    style.background = Some(if active { CYAN_DARK } else { PANEL_LIGHT }.into());
+                    style.text_color = if active { CYAN } else { TEXT };
+                    style.border = Border::default().rounded(9).width(1).color(if active { EDGE_BRIGHT } else { EDGE });
+                    if matches!(status, button::Status::Hovered) {
+                        style.background = Some(PANEL_LIGHT.into());
+                    }
+                    style
+                })
+        );
+    }
+
+    let current_profile = selected.map(|item| format!(
+        "{} · Minecraft {} · {}",
+        item.name, item.game_version, loader_label(item.loader)
+    )).unwrap_or_else(|| "Сборка не выбрана".to_owned());
+
+    let mut installed_list = column![].spacing(7);
+    if app.installed_mods.is_empty() {
+        installed_list = installed_list.push(
+            text("Пока нет модов, установленных через каталог GlowstoneCL.")
+                .size(9).color(SUBTLE)
+        );
+    } else {
+        for item in &app.installed_mods {
+            let project_id = item.project_id.clone();
+            let target_id = app.mod_target_instance.clone().unwrap_or_default();
+            installed_list = installed_list.push(
+                container(
+                    row![
+                        column![
+                            text(item.title.clone()).size(10).color(TEXT),
+                            text(format!("{} · {}", item.version_number, item.file_name)).size(8).color(MUTED),
+                            if item.dependency {
+                                text("ОБЯЗАТЕЛЬНАЯ ЗАВИСИМОСТЬ").size(7).color(PURPLE)
+                            } else {
+                                text("MODRINTH").size(7).color(CYAN)
+                            },
+                        ].spacing(3),
+                        Space::new().width(Length::Fill),
+                        quiet_button("Удалить", Message::RemoveMod(target_id, project_id)),
+                    ].align_y(Alignment::Center).spacing(8)
+                )
+                .padding(10)
+                .width(Length::Fill)
+                .style(|_| glass_style(PANEL_LIGHT, EDGE))
+            );
+        }
+    }
+
+    let mut results_list = column![].spacing(9);
+    for project in &app.mod_results {
+        let installed = app.installed_mods.iter().any(|item| item.project_id == project.project_id);
+        let project_id = project.project_id.clone();
+        let project_name = project.title.clone();
+        let button_label = if installed { "Установлен" } else { "Установить" };
+        let action = if installed {
+            Message::Info("Этот мод уже установлен в выбранную сборку.")
+        } else {
+            Message::InstallMod(project_id)
+        };
+        let versions = project.versions.iter().take(5).cloned().collect::<Vec<_>>().join(" · ");
+        let versions = if versions.is_empty() { "Совместимая версия".to_owned() } else { versions };
+        results_list = results_list.push(
+            container(
+                row![
+                    column![
+                        text(project_name).size(12).color(TEXT),
+                        text(format!("от {} · {} загрузок", project.author, format_downloads(project.downloads)))
+                            .size(8).color(CYAN),
+                        text(project.description.clone()).size(9).color(MUTED),
+                        text(versions).size(8).color(SUBTLE),
+                    ].spacing(5).width(Length::Fill),
+                    if installed {
+                        status_chip("УСТАНОВЛЕН", CYAN_DARK, CYAN)
+                    } else {
+                        primary_button(button_label, action)
+                    },
+                ].spacing(12).align_y(Alignment::Center)
+            )
+            .padding(13)
+            .width(Length::Fill)
+            .style(|_| glass_style(PANEL, EDGE))
+        );
+    }
+
+    let mut content = column![
+        section_header("MODRINTH · КАТАЛОГ МОДОВ", "Поиск и установка модов Minecraft Java с учётом версии игры и загрузчика."),
+        container(
+            column![
+                row![
+                    text_input("Название мода: Sodium, JEI, Create…", &app.search)
+                        .on_input(Message::SearchChanged)
+                        .on_submit(Message::SearchMods)
+                        .padding(10)
+                        .size(10)
+                        .width(Length::Fill),
+                    primary_button("Найти", Message::SearchMods),
+                ].spacing(8),
+                targets,
+                text(format!("Целевая сборка: {current_profile}")).size(9).color(MUTED),
+                text("Моды будут установлены только в эту сборку. Обязательные зависимости Modrinth скачиваются автоматически.")
+                    .size(8).color(SUBTLE),
+            ].spacing(9)
+        )
+        .padding(14)
+        .width(Length::Fill)
+        .style(|_| glass_style(PANEL, EDGE)),
+    ].spacing(12).width(Length::Fill);
+
+    if target_count == 0 {
+        content = content.push(
+            container(
+                column![
+                    icon("puzzle", PURPLE, 24.0),
+                    text("Сначала нужна Java-сборка с загрузчиком модов").size(13).color(TEXT),
+                    text("Создай сборку Minecraft Java и выбери Fabric, Forge, NeoForge или Quilt. После этого вернись в каталог.")
+                        .size(9).color(MUTED),
+                    primary_button("Создать сборку", Message::Navigate(Page::Instances)),
+                ].spacing(8)
+            )
+            .padding(18).width(Length::Fill)
+            .style(|_| glass_style(PANEL, EDGE))
+        );
+    } else {
+        content = content.push(
+            column![
+                row![
+                    text("УСТАНОВЛЕННЫЕ МОДЫ").size(9).color(CYAN),
+                    Space::new().width(Length::Fill),
+                    text(format!("{}", app.installed_mods.len())).size(9).color(MUTED),
+                ].align_y(Alignment::Center),
+                installed_list,
+            ].spacing(8)
+        );
+        content = content.push(
+            row![
+                text("РЕЗУЛЬТАТЫ ПОИСКА").size(9).color(CYAN),
+                Space::new().width(Length::Fill),
+                quiet_button("Обновить", Message::SearchMods),
+            ].align_y(Alignment::Center)
+        );
+        if app.mods_busy {
+            content = content.push(text("Обращаюсь к Modrinth…").size(9).color(MUTED));
+        }
+        if let Some(error) = &app.mods_error {
+            content = content.push(
+                container(text(error.clone()).size(9).color(ORANGE))
+                    .padding(11).width(Length::Fill)
+                    .style(|_| glass_style(PANEL, EDGE))
+            );
+        }
+        if app.mod_results.is_empty() && !app.mods_busy && app.mods_error.is_none() {
+            content = content.push(text("Ничего не найдено. Попробуй изменить запрос.").size(9).color(MUTED));
+        }
+        content = content.push(results_list);
+    }
+
+    if let Some(notice) = &app.notice {
+        content = content.push(
+            container(text(notice.clone()).size(9).color(TEXT))
+                .padding(10).width(Length::Fill)
+                .style(|_| glass_style(CYAN_DARK, EDGE_BRIGHT))
+        );
+    }
+    content.into()
+}
+
+fn format_downloads(value: u64) -> String {
+    if value >= 1_000_000 {
+        format!("{:.1} млн", value as f64 / 1_000_000.0)
+    } else if value >= 1_000 {
+        format!("{:.1} тыс.", value as f64 / 1_000.0)
+    } else {
+        value.to_string()
+    }
 }
 
 fn source_card(
