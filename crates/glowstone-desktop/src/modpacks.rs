@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn hash_verification_rejects_modified_pack_files() {
         assert!(verify_hashes(b"expected", &serde_json::json!({
-            "sha256": format!("{:x}", Sha256::digest(b"expected"))
+            "sha256": hex_digest(&Sha256::digest(b"expected"))
         })).is_ok());
         assert!(verify_hashes(b"tampered", &serde_json::json!({
             "sha256": format!("{:x}", Sha256::digest(b"expected"))
