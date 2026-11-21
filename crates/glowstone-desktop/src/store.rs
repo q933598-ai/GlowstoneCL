@@ -491,6 +491,22 @@ pub fn load_skin_pixels(account_uuid: &str, skin_id: &str) -> Result<std::sync::
     Ok(std::sync::Arc::new(pixels))
 }
 
+/// Returns the active skin file and its model for game launch integration.
+pub fn active_skin_file(account_uuid: &str) -> Result<Option<(PathBuf, SkinModel)>, String> {
+    let collection = load_skin_collection(account_uuid)?;
+    let Some(active_id) = collection.active_skin_id.as_deref() else {
+        return Ok(None);
+    };
+    let skin = collection.skins.iter()
+        .find(|skin| skin.id == active_id)
+        .ok_or_else(|| "Активный скин отсутствует в коллекции аккаунта.".to_owned())?;
+    let path = skin_file_path(account_uuid, &skin.id)?;
+    if !path.is_file() {
+        return Err("Файл активного скина отсутствует. Импортируй его заново.".to_owned());
+    }
+    Ok(Some((path, skin.model)))
+}
+
 pub fn skin_image_path(account_uuid: &str, skin_id: &str) -> Result<PathBuf, String> {
     skin_file_path(account_uuid, skin_id)
 }
