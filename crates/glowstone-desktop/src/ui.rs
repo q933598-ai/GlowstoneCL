@@ -150,6 +150,7 @@ pub enum Message {
     ToggleFavorite(String),
     OpenNews(usize),
     RefreshRecentPlays,
+    WardrobeAnimationTick,
     OpenRepository,
     Info(&'static str),
 }
@@ -203,6 +204,7 @@ pub struct App {
     wardrobe_preview: Option<std::sync::Arc<Vec<[u8; 4]>>>,
     wardrobe_skin_previews: HashMap<String, std::sync::Arc<Vec<[u8; 4]>>>,
     wardrobe_angle: f32,
+    wardrobe_walk_phase: f32,
     recent_plays: Vec<store::RecentPlay>,
     selected_news: Option<usize>,
 }
@@ -278,6 +280,7 @@ impl Default for App {
                 .and_then(|id| wardrobe_skin_previews.get(id).cloned()),
             wardrobe_skin_previews,
             wardrobe_angle: 0.0,
+            wardrobe_walk_phase: 0.0,
             recent_plays: store::load_recent_plays(),
             selected_news: None,
             data,
@@ -1444,6 +1447,10 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 app.recent_plays = latest;
             }
         }
+        Message::WardrobeAnimationTick => {
+            app.wardrobe_walk_phase = (app.wardrobe_walk_phase + 0.24)
+                .rem_euclid(std::f32::consts::TAU);
+        }
         Message::OpenRepository => {
             app.notice = Some(match webbrowser::open("https://github.com/q933598-ai/GlowstoneCL") {
                 Ok(()) => "Открываю репозиторий GlowstoneCL на GitHub.".to_owned(),
@@ -1457,7 +1464,10 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
 }
 
 pub fn subscription(app: &App) -> iced::Subscription<Message> {
-    if app.launch_busy.is_some() {
+    if app.page == Page::Wardrobe {
+        iced::time::every(std::time::Duration::from_millis(110))
+            .map(|_| Message::WardrobeAnimationTick)
+    } else if app.launch_busy.is_some() {
         iced::time::every(std::time::Duration::from_secs(1))
             .map(|_| Message::RefreshRecentPlays)
     } else {
@@ -3066,7 +3076,7 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
                 ].align_y(Alignment::Center),
                 canvas::Canvas::new(crate::skin_preview::SkinPreview::new(
                     texture.clone(), skin.model, app.wardrobe_angle,
-                ))
+                ).with_walk_phase(app.wardrobe_walk_phase))
                     .width(Length::Fill)
                     .height(Length::Fixed(330.0)),
                 row![
@@ -3092,14 +3102,15 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
     };
 
     let active_preview: Element<'_, Message> = if let Some(active_id) = app.wardrobe_active_skin_id.as_deref() {
-        if let Ok(path) = store::skin_image_path(&account_uuid, active_id) {
-            if let Some(skin) = app.wardrobe_skins.iter().find(|skin| skin.id == active_id) {
+        if let Some(skin) = app.wardrobe_skins.iter().find(|skin| skin.id == active_id) {
+            if let Some(texture) = app.wardrobe_skin_previews.get(active_id).cloned() {
                 container(
                     row![
-                        image::Image::new(image::Handle::from_path(path))
-                            .width(Length::Fixed(112.0))
-                            .height(Length::Fixed(112.0))
-                            .content_fit(ContentFit::Contain),
+                        canvas::Canvas::new(crate::skin_preview::SkinPreview::new(
+                            texture, skin.model, 0.0,
+                        ).with_walk_phase(app.wardrobe_walk_phase))
+                            .width(Length::Fixed(104.0))
+                            .height(Length::Fixed(132.0)),
                         column![
                             text("АКТИВНЫЙ СКИН").size(8).color(CYAN),
                             text(skin.name.clone()).size(14).color(TEXT),
@@ -3112,9 +3123,9 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
                         status_chip("ВЫБРАН", CYAN_DARK, CYAN),
                     ]
                     .align_y(Alignment::Center)
-                    .spacing(15),
+                    .spacing(12),
                 )
-                .padding(14)
+                .padding(12)
                 .width(Length::Fill)
                 .style(|_| glass_style(CYAN_DARK, EDGE_BRIGHT))
                 .into()
