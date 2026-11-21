@@ -626,17 +626,17 @@ capabilities = ["registries"]
 
     #[test]
     fn content_manifest_requires_registry_capability_and_api() {
-        let missing = VALID.replace("capabilities = [\\"registries\\"]", "capabilities = []");
+        let missing = VALID.replace(r#"capabilities = ["registries"]"#, "capabilities = []");
         assert!(validate_content_manifest(&missing, "coords_hud", "0.1.0").is_err());
-        let wrong_api = VALID.replace("api = \\"0.2\\"", "api = \\"0.3\\"");
+        let wrong_api = VALID.replace(r#"api = "0.2""#, r#"api = "0.3""#);
         assert!(validate_content_manifest(&wrong_api, "coords_hud", "0.1.0").is_err());
     }
 
     #[test]
     fn content_installer_refuses_native_or_wasm_manifest_tables() {
-        let native = format!("{VALID}\\n[native]\\ngame = \\"26.3\\"");
+        let native = format!("{VALID}\n[native]\ngame = \"26.3\"");
         assert!(validate_content_manifest(&native, "coords_hud", "0.1.0").is_err());
-        let wasm = format!("{VALID}\\n[wasm]\\nentry = \\"mod.wasm\\"");
+        let wasm = format!("{VALID}\n[wasm]\nentry = \"mod.wasm\"");
         assert!(validate_content_manifest(&wasm, "coords_hud", "0.1.0").is_err());
     }
 
