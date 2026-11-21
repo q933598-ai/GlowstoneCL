@@ -77,6 +77,88 @@ pub struct PersistedState {
     pub instances: Vec<GameInstance>,
     pub accounts: Vec<AccountProfile>,
     pub settings: AppSettings,
+    /// IDs of user-pinned profiles. Missing in older state.json files is supported.
+    pub favorite_instance_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecentPlay {
+    pub instance_id: String,
+    pub launched_at: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+struct RecentPlayState {
+    entries: Vec<RecentPlay>,
+}
+
+const MAX_RECENT_PLAYS: usize = 12;
+
+/// Stores recent launches separately from state.json. The launch process can update
+/// history while the UI is waiting for the game without overwriting account/settings data.
+pub fn load_recent_plays() -> Vec<RecentPlay> {
+    let Some(path) = app_data_dir().ok().map(|dir| dir.join("recent-plays.json")) else {
+        return Vec::new();
+    };
+    fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<RecentPlayState>(&bytes).ok())
+        .map(|history| history.entries)
+        .unwrap_or_default()
+}
+
+pub fn record_recent_play(instance_id: &str) -> Result<(), String> {
+    Uuid::parse_str(instance_id)
+        .map_err(|_| "Некорректный идентификатор сборки в истории запусков.".to_owned())?;
+    let path = app_data_dir()?.join("recent-plays.json");
+    let parent = path.parent()
+        .ok_or_else(|| "Некорректный каталог истории запусков.".to_owned())?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("Не удалось создать каталог истории запусков: {error}"))?;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut history = fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<RecentPlayState>(&bytes).ok())
+        .unwrap_or_default();
+    history.entries.retain(|entry| entry.instance_id != instance_id);
+    history.entries.insert(0, RecentPlay {
+        instance_id: instance_id.to_owned(),
+        launched_at: now,
+    });
+    history.entries.truncate(MAX_RECENT_PLAYS);
+
+    let temporary = path.with_extension("json.tmp");
+    let bytes = serde_json::to_vec_pretty(&history)
+        .map_err(|error| format!("Не удалось подготовить историю запусков: {error}"))?;
+    fs::write(&temporary, bytes)
+        .map_err(|error| format!("Не удалось записать историю запусков: {error}"))?;
+    fs::rename(&temporary, &path)
+        .map_err(|error| format!("Не удалось сохранить историю запусков: {error}"))?;
+    Ok(())
+}
+
+/// Counts only package files belonging to the selected platform's mod directory.
+pub fn installed_mod_count(instance_id: &str, platform: GamePlatform) -> usize {
+    let Ok(directory) = instance_directory(instance_id) else {
+        return 0;
+    };
+    let (folder, extension) = match platform {
+        GamePlatform::Java => ("mods", "jar"),
+        GamePlatform::Horizon | GamePlatform::HorizonOffline => ("horizon-mods", "hmod"),
+    };
+    fs::read_dir(directory.join(folder))
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_file()
+            && entry.path().extension().is_some_and(|value| value.eq_ignore_ascii_case(extension)))
+        .count()
 }
 
 pub fn load() -> PersistedState {
