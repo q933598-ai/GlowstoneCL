@@ -548,7 +548,8 @@ fn nightly_version(release: &GithubRelease) -> Result<String, String> {
     {
         return Err("Commit в заголовке Nightly Horizon имеет неверный формат.".to_owned());
     }
-    Ok(format!("nightly-{date}-{commit.to_ascii_lowercase()}"))
+    let commit = commit.to_ascii_lowercase();
+    Ok(format!("nightly-{date}-{commit}"))
 }
 
 fn valid_date(value: &str) -> bool {
