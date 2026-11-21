@@ -1,6 +1,7 @@
 //! Modrinth search and per-instance Java mod installation.
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use tokio::task::JoinSet;
 
 use glowstone_core::{GameInstance, GamePlatform, LoaderKind};
 use serde::{Deserialize, Serialize};
@@ -32,6 +33,8 @@ pub struct ModProject {
     pub icon_url: Option<String>,
     #[serde(default)]
     pub versions: Vec<String>,
+    #[serde(skip)]
+    pub icon_data: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +46,10 @@ pub struct InstalledMod {
     pub version_id: String,
     #[serde(default)]
     pub dependency: bool,
+    #[serde(default)]
+    pub icon_url: Option<String>,
+    #[serde(skip)]
+    pub icon_data: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -130,8 +137,105 @@ pub async fn search(instance: GameInstance, query: String) -> Result<Vec<ModProj
         .await
         .map_err(|error| format!("Modrinth вернул некорректный результат поиска: {error}"))?;
 
-    serde_json::from_value(response["hits"].clone())
-        .map_err(|error| format!("Список модов Modrinth не удалось прочитать: {error}"))
+    let projects: Vec<ModProject> = serde_json::from_value(response["hits"].clone())
+        .map_err(|error| format!("Список модов Modrinth не удалось прочитать: {error}"))?;
+    let mut tasks = JoinSet::new();
+    for (index, mut project) in projects.into_iter().enumerate() {
+        let http = http.clone();
+        let project_id = project.project_id.clone();
+        let icon_url = project.icon_url.clone();
+        tasks.spawn(async move {
+            project.icon_data = cache_remote_icon(
+                &http,
+                "modrinth",
+                &project_id,
+                icon_url.as_deref(),
+            ).await;
+            (index, project)
+        });
+    }
+    let mut enriched = Vec::new();
+    while let Some(result) = tasks.join_next().await {
+        if let Ok(project) = result {
+            enriched.push(project);
+        }
+    }
+    enriched.sort_by_key(|(index, _)| *index);
+    Ok(enriched.into_iter().map(|(_, project)| project).collect())
+}
+
+const MAX_ICON_BYTES: usize = 5 * 1024 * 1024;
+
+fn icon_cache_path(source: &str, project_id: &str) -> Option<PathBuf> {
+    if project_id.is_empty()
+        || !project_id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+    {
+        return None;
+    }
+    Some(store::app_data_dir().ok()?.join("mod-icons").join(format!("{source}-{project_id}.img")))
+}
+
+fn allowed_icon_url(source: &str, value: &str) -> Option<reqwest::Url> {
+    let url = reqwest::Url::parse(value).ok()?;
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
+        return None;
+    }
+    let host = url.host_str()?;
+    let allowed = match source {
+        "modrinth" => host == "cdn.modrinth.com",
+        "horizon" => host == "horizon-rust.github.io" || host == "raw.githubusercontent.com",
+        _ => false,
+    };
+    allowed.then_some(url)
+}
+
+fn looks_like_image(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"\\x89PNG\\r\\n\\x1a\\n")
+        || bytes.starts_with(&[0xff, 0xd8, 0xff])
+        || bytes.starts_with(b"GIF8")
+        || (bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP")
+}
+
+async fn cache_remote_icon(
+    http: &reqwest::Client,
+    source: &str,
+    project_id: &str,
+    icon_url: Option<&str>,
+) -> Option<Vec<u8>> {
+    let path = icon_cache_path(source, project_id)?;
+    if let Ok(bytes) = tokio::fs::read(&path).await {
+        if !bytes.is_empty() && bytes.len() <= MAX_ICON_BYTES && looks_like_image(&bytes) {
+            return Some(bytes);
+        }
+    }
+    let url = allowed_icon_url(source, icon_url?)?;
+    let response = http.get(url).send().await.ok()?.error_for_status().ok()?;
+    if response.content_length().is_some_and(|size| size > MAX_ICON_BYTES as u64) {
+        return None;
+    }
+    let bytes = response.bytes().await.ok()?;
+    if bytes.is_empty() || bytes.len() > MAX_ICON_BYTES || !looks_like_image(&bytes) {
+        return None;
+    }
+    let parent = path.parent()?;
+    tokio::fs::create_dir_all(parent).await.ok()?;
+    let temporary = path.with_extension("img.tmp");
+    tokio::fs::write(&temporary, &bytes).await.ok()?;
+    tokio::fs::rename(&temporary, &path).await.ok()?;
+    Some(bytes.to_vec())
+}
+
+fn cached_icon(source: &str, project_id: &str) -> Option<Vec<u8>> {
+    let path = icon_cache_path(source, project_id)?;
+    let bytes = std::fs::read(path).ok()?;
+    (!bytes.is_empty() && bytes.len() <= MAX_ICON_BYTES && looks_like_image(&bytes))
+        .then_some(bytes)
+}
+
+fn hydrate_installed_icons(mods: &mut [InstalledMod]) {
+    for item in mods {
+        item.icon_data = cached_icon("modrinth", &item.project_id);
+    }
 }
 
 fn manifest_path(instance_id: &str) -> Result<PathBuf, String> {
@@ -172,6 +276,7 @@ pub fn installed(instance_id: &str) -> Result<Vec<InstalledMod>, String> {
                 .unwrap_or(false)
     });
     mods.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    hydrate_installed_icons(&mut mods);
     Ok(mods)
 }
 
@@ -446,6 +551,7 @@ pub async fn install(instance: GameInstance, project_id: String) -> Result<Vec<I
                 }
 
                 let project_title = project["title"].as_str().unwrap_or(&project_id).to_owned();
+                let icon_url = project["icon_url"].as_str().map(str::to_owned);
                 // The install step is pushed first. Dependencies go on top of it,
                 // so the requested root is written only after its required graph.
                 pending.push(InstallStep::Install {
@@ -497,6 +603,12 @@ pub async fn install(instance: GameInstance, project_id: String) -> Result<Vec<I
                 }
                 let file = selected_jar(&version)?;
                 let file_name = download_jar(&http, &instance.id.0, &project_id, &file).await?;
+                let icon_data = cache_remote_icon(
+                    &http,
+                    "modrinth",
+                    &project_id,
+                    icon_url.as_deref(),
+                ).await;
                 manifest.mods.push(InstalledMod {
                     project_id: project_id.clone(),
                     title: project["title"].as_str().unwrap_or(&project_id).to_owned(),
@@ -504,12 +616,15 @@ pub async fn install(instance: GameInstance, project_id: String) -> Result<Vec<I
                     version_number: version["version_number"].as_str().unwrap_or("unknown").to_owned(),
                     version_id: version["id"].as_str().unwrap_or_default().to_owned(),
                     dependency,
+                    icon_url,
+                    icon_data,
                 });
                 save_manifest(&instance.id.0, &manifest)?;
             }
         }
     }
 
+    hydrate_installed_icons(&mut manifest.mods);
     Ok(manifest.mods)
 }
 
@@ -528,5 +643,6 @@ pub fn remove(instance_id: &str, project_id: &str) -> Result<Vec<InstalledMod>, 
         }
     }
     save_manifest(instance_id, &manifest)?;
+    hydrate_installed_icons(&mut manifest.mods);
     Ok(manifest.mods)
 }
