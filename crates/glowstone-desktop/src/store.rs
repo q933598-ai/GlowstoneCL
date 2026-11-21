@@ -490,4 +490,38 @@ mod tests {
             LoaderKind::Fabric,
         ).is_err());
     }
+
+    fn make_test_png(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, width, height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer
+                .write_image_data(&vec![0; (width * height * 4) as usize])
+                .unwrap();
+            writer.finish().unwrap();
+        }
+        bytes
+    }
+
+    #[test]
+    fn skin_validation_accepts_standard_and_legacy_dimensions() {
+        assert!(!validate_skin_png(&make_test_png(64, 64)).unwrap());
+        assert!(validate_skin_png(&make_test_png(64, 32)).unwrap());
+    }
+
+    #[test]
+    fn skin_validation_rejects_wrong_dimensions_and_corrupt_data() {
+        assert!(validate_skin_png(&make_test_png(128, 128)).is_err());
+        assert!(validate_skin_png(b"not a png").is_err());
+    }
+
+    #[test]
+    fn skin_names_are_trimmed_and_bounded() {
+        assert_eq!(clean_skin_name("  Explorer  ").unwrap(), "Explorer");
+        assert!(clean_skin_name("").is_err());
+        assert!(clean_skin_name("x".repeat(33).as_str()).is_err());
+    }
 }
