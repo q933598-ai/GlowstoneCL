@@ -1,0 +1,460 @@
+//! Modrinth search and per-instance Java mod installation.
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+use glowstone_core::{GameInstance, GamePlatform, LoaderKind};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sha1::Sha1;
+use sha2::{Digest as _, Sha512};
+
+use crate::store;
+
+const API: &str = "https://api.modrinth.com/v2";
+const USER_AGENT: &str = "GlowstoneCL/0.1.0 (https://github.com/q933598-ai/GlowstoneCL)";
+const MANIFEST_NAME: &str = ".glowstone-modrinth.json";
+const MAX_MOD_BYTES: usize = 512 * 1024 * 1024;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModProject {
+    pub project_id: String,
+    #[serde(default)]
+    pub slug: Option<String>,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub author: String,
+    #[serde(default)]
+    pub downloads: u64,
+    #[serde(default)]
+    pub icon_url: Option<String>,
+    #[serde(default)]
+    pub versions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstalledMod {
+    pub project_id: String,
+    pub title: String,
+    pub file_name: String,
+    pub version_number: String,
+    pub version_id: String,
+    #[serde(default)]
+    pub dependency: bool,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct InstalledManifest {
+    #[serde(default)]
+    mods: Vec<InstalledMod>,
+}
+
+fn loader_tag(instance: &GameInstance) -> Result<&'static str, String> {
+    if instance.platform != GamePlatform::Java {
+        return Err("Моды Modrinth устанавливаются в сборки Minecraft Java, не в Horizon.".to_owned());
+    }
+    match instance.loader {
+        LoaderKind::Fabric => Ok("fabric"),
+        LoaderKind::Forge => Ok("forge"),
+        LoaderKind::NeoForge => Ok("neoforge"),
+        LoaderKind::Quilt => Ok("quilt"),
+        LoaderKind::Vanilla => Err("Для установки модов создай сборку с Fabric, Forge, NeoForge или Quilt.".to_owned()),
+        LoaderKind::HorizonContent | LoaderKind::HorizonNative => {
+            Err("Выбран Horizon-загрузчик. Для него используются HMOD/HNMOD, а не Java-моды.".to_owned())
+        }
+    }
+}
+
+fn client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|error| format!("Не удалось создать HTTP-клиент Modrinth: {error}"))
+}
+
+async fn resolve_game_version(client: &reqwest::Client, requested: &str) -> Result<String, String> {
+    match requested.trim().to_ascii_lowercase().as_str() {
+        "stable" | "latest" | "release" | "latest_release" => {}
+        "snapshot" | "latest snapshot" | "latest_snapshot" => {}
+        _ => return Ok(requested.trim().to_owned()),
+    }
+    let manifest = client
+        .get("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")
+        .send()
+        .await
+        .map_err(|error| format!("Не удалось определить версию Minecraft для поиска модов: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("Mojang не вернул список версий: {error}"))?
+        .json::<Value>()
+        .await
+        .map_err(|error| format!("Список версий Mojang повреждён: {error}"))?;
+    let key = if matches!(requested.trim().to_ascii_lowercase().as_str(), "snapshot" | "latest snapshot" | "latest_snapshot") {
+        "snapshot"
+    } else {
+        "release"
+    };
+    manifest["latest"][key]
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| "В манифесте Mojang не найдена актуальная версия Minecraft.".to_owned())
+}
+
+/// Search only projects that have a version for the selected profile's game version and loader.
+pub async fn search(instance: GameInstance, query: String) -> Result<Vec<ModProject>, String> {
+    let loader = loader_tag(&instance)?;
+    let http = client()?;
+    let version = resolve_game_version(&http, &instance.game_version).await?;
+    let facets = serde_json::json!([
+        ["project_type:mod"],
+        [format!("versions:{version}")],
+        [format!("categories:{loader}")]
+    ]).to_string();
+
+    let response = http
+        .get(format!("{API}/search"))
+        .query(&[
+            ("query", query.trim()),
+            ("facets", facets.as_str()),
+            ("index", "downloads"),
+            ("limit", "30"),
+        ])
+        .send()
+        .await
+        .map_err(|error| format!("Не удалось обратиться к Modrinth: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("Modrinth отклонил поиск: {error}"))?
+        .json::<Value>()
+        .await
+        .map_err(|error| format!("Modrinth вернул некорректный результат поиска: {error}"))?;
+
+    serde_json::from_value(response["hits"].clone())
+        .map_err(|error| format!("Список модов Modrinth не удалось прочитать: {error}"))
+}
+
+fn manifest_path(instance_id: &str) -> Result<PathBuf, String> {
+    Ok(store::instance_directory(instance_id)?.join("mods").join(MANIFEST_NAME))
+}
+
+fn read_manifest(instance_id: &str) -> Result<InstalledManifest, String> {
+    let path = manifest_path(instance_id)?;
+    if !path.is_file() {
+        return Ok(InstalledManifest::default());
+    }
+    let bytes = std::fs::read(&path)
+        .map_err(|error| format!("Не удалось прочитать список установленных модов: {error}"))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| format!("Список установленных модов повреждён: {error}"))
+}
+
+fn save_manifest(instance_id: &str, manifest: &InstalledManifest) -> Result<(), String> {
+    let path = manifest_path(instance_id)?;
+    let parent = path.parent().ok_or_else(|| "Не найден каталог модов.".to_owned())?;
+    std::fs::create_dir_all(parent)
+        .map_err(|error| format!("Не удалось создать каталог модов: {error}"))?;
+    let temporary = path.with_extension("json.tmp");
+    let bytes = serde_json::to_vec_pretty(manifest)
+        .map_err(|error| format!("Не удалось сериализовать список модов: {error}"))?;
+    std::fs::write(&temporary, bytes)
+        .map_err(|error| format!("Не удалось сохранить список модов: {error}"))?;
+    std::fs::rename(&temporary, &path)
+        .map_err(|error| format!("Не удалось обновить список модов: {error}"))
+}
+
+pub fn installed(instance_id: &str) -> Result<Vec<InstalledMod>, String> {
+    let mut mods = read_manifest(instance_id)?.mods;
+    mods.retain(|item| {
+        safe_filename(&item.file_name).is_some()
+            && store::instance_directory(instance_id)
+                .map(|dir| dir.join("mods").join(&item.file_name).is_file())
+                .unwrap_or(false)
+    });
+    mods.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    Ok(mods)
+}
+
+fn safe_filename(value: &str) -> Option<&str> {
+    let path = Path::new(value);
+    let name = path.file_name()?.to_str()?;
+    if name != value || !name.to_ascii_lowercase().ends_with(".jar")
+        || name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains(['/', '\\', '\0'])
+    {
+        return None;
+    }
+    Some(name)
+}
+
+fn valid_project_id(value: &str) -> bool {
+    (4..=64).contains(&value.len()) && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
+}
+
+async fn get_project(http: &reqwest::Client, project_id: &str) -> Result<Value, String> {
+    http.get(format!("{API}/project/{project_id}"))
+        .send()
+        .await
+        .map_err(|error| format!("Не удалось получить карточку мода: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("Modrinth не нашёл проект {project_id}: {error}"))?
+        .json::<Value>()
+        .await
+        .map_err(|error| format!("Карточка мода {project_id} повреждена: {error}"))
+}
+
+async fn compatible_versions(
+    http: &reqwest::Client,
+    instance: &GameInstance,
+    project_id: &str,
+) -> Result<Vec<Value>, String> {
+    let loader = loader_tag(instance)?;
+    let game_version = resolve_game_version(http, &instance.game_version).await?;
+    let game_versions = serde_json::json!([game_version]).to_string();
+    let loaders = serde_json::json!([loader]).to_string();
+    http.get(format!("{API}/project/{project_id}/version"))
+        .query(&[("game_versions", game_versions.as_str()), ("loaders", loaders.as_str())])
+        .send()
+        .await
+        .map_err(|error| format!("Не удалось получить версии мода {project_id}: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("Modrinth не вернул совместимые версии {project_id}: {error}"))?
+        .json::<Vec<Value>>()
+        .await
+        .map_err(|error| format!("Список версий мода {project_id} повреждён: {error}"))
+}
+
+async fn get_version(http: &reqwest::Client, version_id: &str) -> Result<Value, String> {
+    http.get(format!("{API}/version/{version_id}"))
+        .send()
+        .await
+        .map_err(|error| format!("Не удалось получить зависимость {version_id}: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("Modrinth не нашёл версию зависимости {version_id}: {error}"))?
+        .json::<Value>()
+        .await
+        .map_err(|error| format!("Данные зависимости {version_id} повреждены: {error}"))
+}
+
+fn selected_jar(version: &Value) -> Result<Value, String> {
+    let files = version["files"].as_array()
+        .ok_or_else(|| "Modrinth не приложил файлы к выбранной версии.".to_owned())?;
+    files.iter()
+        .find(|file| file["primary"].as_bool() == Some(true)
+            && file["filename"].as_str().is_some_and(|name| name.to_ascii_lowercase().ends_with(".jar")))
+        .or_else(|| files.iter().find(|file| {
+            file["filename"].as_str().is_some_and(|name| name.to_ascii_lowercase().ends_with(".jar"))
+        }))
+        .cloned()
+        .ok_or_else(|| "В выбранной версии нет JAR-файла для Minecraft Java.".to_owned())
+}
+
+async fn download_jar(
+    http: &reqwest::Client,
+    instance_id: &str,
+    project_id: &str,
+    file: &Value,
+) -> Result<String, String> {
+    let original_name = file["filename"].as_str()
+        .ok_or_else(|| "Modrinth не указал имя файла мода.".to_owned())?;
+    let original_name = safe_filename(original_name)
+        .ok_or_else(|| "Modrinth вернул небезопасное имя JAR-файла.".to_owned())?;
+    let url_text = file["url"].as_str()
+        .ok_or_else(|| "Modrinth не указал ссылку на JAR-файл.".to_owned())?;
+    let url = reqwest::Url::parse(url_text)
+        .map_err(|error| format!("Modrinth вернул некорректную ссылку на файл: {error}"))?;
+    if url.scheme() != "https" || url.host_str() != Some("cdn.modrinth.com") {
+        return Err("Загрузка остановлена: Modrinth вернул ссылку не на свой HTTPS CDN.".to_owned());
+    }
+
+    let mods_dir = store::instance_directory(instance_id)?.join("mods");
+    tokio::fs::create_dir_all(&mods_dir)
+        .await
+        .map_err(|error| format!("Не удалось создать папку mods: {error}"))?;
+
+    // Prefixing the project ID avoids overwriting an unrelated JAR with the same name.
+    let file_name = format!("{project_id}-{original_name}");
+    let target = mods_dir.join(&file_name);
+    let temporary = mods_dir.join(format!(".{file_name}.part"));
+    let response = http.get(url).send().await
+        .map_err(|error| format!("Не удалось скачать {original_name}: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("CDN Modrinth не отдал {original_name}: {error}"))?;
+    if response.content_length().is_some_and(|size| size > MAX_MOD_BYTES as u64) {
+        return Err("Файл мода превышает лимит 512 МиБ.".to_owned());
+    }
+    let bytes = response.bytes().await
+        .map_err(|error| format!("Не удалось прочитать {original_name}: {error}"))?;
+    if bytes.is_empty() || bytes.len() > MAX_MOD_BYTES {
+        return Err("Modrinth вернул пустой или слишком большой файл мода.".to_owned());
+    }
+
+    let hashes = &file["hashes"];
+    let valid_hash = if let Some(expected) = hashes["sha512"].as_str() {
+        hex(&Sha512::digest(&bytes)) == expected
+    } else if let Some(expected) = hashes["sha1"].as_str() {
+        hex(&Sha1::digest(&bytes)) == expected
+    } else {
+        return Err("Modrinth не предоставил SHA-1 или SHA-512 для проверки файла.".to_owned());
+    };
+    if !valid_hash {
+        return Err(format!("Контрольная сумма {original_name} не совпала. Файл удалён."));
+    }
+
+    tokio::fs::write(&temporary, &bytes).await
+        .map_err(|error| format!("Не удалось сохранить временный файл мода: {error}"))?;
+    if target.exists() {
+        tokio::fs::remove_file(&target).await
+            .map_err(|error| format!("Не удалось заменить старую версию {file_name}: {error}"))?;
+    }
+    tokio::fs::rename(&temporary, &target).await
+        .map_err(|error| format!("Не удалось установить {file_name}: {error}"))?;
+    Ok(file_name)
+}
+
+fn hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(DIGITS[(byte >> 4) as usize] as char);
+        output.push(DIGITS[(byte & 0x0f) as usize] as char);
+    }
+    output
+}
+
+async fn install_project_recursive(
+    http: &reqwest::Client,
+    instance: &GameInstance,
+    project_id: &str,
+    exact_version_id: Option<&str>,
+    dependency: bool,
+    visited: &mut HashSet<String>,
+    manifest: &mut InstalledManifest,
+    depth: usize,
+) -> Result<(), String> {
+    if depth > 12 {
+        return Err("Цепочка обязательных зависимостей слишком длинная (лимит 12).".to_owned());
+    }
+    if manifest.mods.iter().any(|item| item.project_id == project_id)
+        || !visited.insert(project_id.to_owned())
+    {
+        return Ok(());
+    }
+    if !valid_project_id(project_id) {
+        return Err("Modrinth вернул некорректный ID проекта.".to_owned());
+    }
+
+    let project = get_project(http, project_id).await?;
+    if project["project_type"].as_str() != Some("mod") {
+        return Err(format!(
+            "Зависимость «{}» не является модом Minecraft.",
+            project["title"].as_str().unwrap_or(project_id)
+        ));
+    }
+
+    let version = if let Some(id) = exact_version_id {
+        get_version(http, id).await?
+    } else {
+        let versions = compatible_versions(http, instance, project_id).await?;
+        versions.into_iter()
+            .find(|item| item["version_type"].as_str() == Some("release"))
+            .or_else(|| None)
+            .or_else(|| {
+                // The API returns newest first; use a beta/alpha only if no release exists.
+                None
+            })
+            .map(Ok)
+            .unwrap_or_else(|| Err(format!(
+                "У мода «{}» нет стабильной версии для выбранной Minecraft и загрузчика.",
+                project["title"].as_str().unwrap_or(project_id)
+            )))?
+    };
+
+    if version["game_versions"].as_array().is_none_or(|items| {
+        !items.iter().any(|item| item.as_str().is_some_and(|value| {
+            instance.game_version == value
+        }))
+    }) && exact_version_id.is_some() {
+        // An exact dependency version is still checked against the selected loader/version below.
+        let loader = loader_tag(instance)?;
+        let requested = resolve_game_version(http, &instance.game_version).await?;
+        let compatible = version["game_versions"].as_array().is_some_and(|items| items.iter().any(|item| item.as_str() == Some(requested.as_str())))
+            && version["loaders"].as_array().is_some_and(|items| items.iter().any(|item| item.as_str() == Some(loader)));
+        if !compatible {
+            return Err(format!("Обязательная зависимость «{}» не совместима с этой сборкой.", project["title"].as_str().unwrap_or(project_id)));
+        }
+    }
+
+    if let Some(dependencies) = version["dependencies"].as_array() {
+        for dep in dependencies {
+            if dep["dependency_type"].as_str() != Some("required") {
+                continue;
+            }
+            let dependency_project = dep["project_id"].as_str();
+            let dependency_version = dep["version_id"].as_str();
+            if let Some(id) = dependency_project {
+                install_project_recursive(
+                    http, instance, id, dependency_version, true, visited, manifest, depth + 1,
+                ).await?;
+            } else if let Some(id) = dependency_version {
+                let fixed = get_version(http, id).await?;
+                if let Some(id) = fixed["project_id"].as_str() {
+                    install_project_recursive(http, instance, id, Some(id), true, visited, manifest, depth + 1).await?;
+                }
+            }
+        }
+    }
+
+    let file = selected_jar(&version)?;
+    let file_name = download_jar(http, &instance.id.0, project_id, &file).await?;
+    let installed = InstalledMod {
+        project_id: project_id.to_owned(),
+        title: project["title"].as_str().unwrap_or(project_id).to_owned(),
+        file_name,
+        version_number: version["version_number"].as_str().unwrap_or("unknown").to_owned(),
+        version_id: version["id"].as_str().unwrap_or_default().to_owned(),
+        dependency,
+    };
+    manifest.mods.push(installed);
+    save_manifest(&instance.id.0, manifest)?;
+    Ok(())
+}
+
+/// Install the most recent release compatible with this Java instance, plus required
+/// Modrinth dependencies. Each downloaded file is hash-verified before it is moved into mods/.
+pub async fn install(instance: GameInstance, project_id: String) -> Result<Vec<InstalledMod>, String> {
+    loader_tag(&instance)?;
+    if !valid_project_id(&project_id) {
+        return Err("Некорректный ID мода Modrinth.".to_owned());
+    }
+    let http = client()?;
+    let mut manifest = read_manifest(&instance.id.0)?;
+    let already_installed = manifest.mods.iter().any(|item| item.project_id == project_id);
+    if already_installed {
+        return Ok(manifest.mods);
+    }
+    let mut visited = HashSet::new();
+    install_project_recursive(
+        &http, &instance, &project_id, None, false, &mut visited, &mut manifest, 0,
+    ).await?;
+    Ok(manifest.mods)
+}
+
+/// Remove only JAR files tracked by GlowstoneCL's Modrinth manifest.
+pub fn remove(instance_id: &str, project_id: &str) -> Result<Vec<InstalledMod>, String> {
+    let mut manifest = read_manifest(instance_id)?;
+    let Some(index) = manifest.mods.iter().position(|item| item.project_id == project_id) else {
+        return Err("Этот мод не установлен через каталог GlowstoneCL.".to_owned());
+    };
+    let item = manifest.mods.remove(index);
+    if let Some(name) = safe_filename(&item.file_name) {
+        let path = store::instance_directory(instance_id)?.join("mods").join(name);
+        if path.is_file() {
+            std::fs::remove_file(&path)
+                .map_err(|error| format!("Не удалось удалить {}: {error}", item.file_name))?;
+        }
+    }
+    save_manifest(instance_id, &manifest)?;
+    Ok(manifest.mods)
+}
