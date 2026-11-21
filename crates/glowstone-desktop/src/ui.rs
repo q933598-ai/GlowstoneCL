@@ -62,10 +62,12 @@ pub enum Message {
     InstanceNameChanged(String),
     InstanceVersionChanged(String),
     CreateInstance,
+    SelectInstance(String),
     LaunchInstance(String),
     DeleteInstance(String),
     OfflineNameChanged(String),
     AddOfflineAccount,
+    SelectAccount(String),
     DeleteAccount(String),
     MicrosoftClientIdChanged(String),
     SaveMicrosoftClientId,
@@ -150,6 +152,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             } else {
                 match store::create_instance(name, version, app.platform.into(), app.loader) {
                     Ok(instance) => {
+                        app.data.settings.selected_instance_id = Some(instance.id.0.clone());
                         app.data.instances.push(instance);
                         match store::save(&app.data) {
                             Ok(()) => {
@@ -166,28 +169,54 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             }
             app.page = Page::Instances;
         }
+        Message::SelectInstance(id) => {
+            if app.data.instances.iter().any(|instance| instance.id.0 == id) {
+                app.data.settings.selected_instance_id = Some(id);
+                app.notice = store::save(&app.data)
+                    .err()
+                    .map(|error| format!("Не удалось сохранить выбранную сборку: {error}"))
+                    .or_else(|| Some("Сборка выбрана.".into()));
+            }
+        }
         Message::LaunchInstance(id) => {
             if let Some(instance) = app.data.instances.iter().find(|item| item.id.0 == id) {
+                let has_account = app.data.settings.selected_account_id
+                    .as_ref()
+                    .is_some_and(|selected| app.data.accounts.iter().any(|account| &account.id == selected));
                 app.notice = Some(match instance.state {
-                    InstanceState::Ready => "Запуск будет подключён после реализации игрового runtime.".into(),
-                    _ => "Эта сборка пока не установлена. Установщик Minecraft будет следующим этапом.".into(),
+                    InstanceState::Ready if !has_account => "Сначала выбери игровой аккаунт в разделе «Аккаунты».".into(),
+                    InstanceState::Ready => "Профиль готов, но загрузчик Minecraft и фактический запуск ещё не подключены.".into(),
+                    _ => "Профиль сохранён, но файлы Minecraft ещё не установлены. Установщик — следующий этап.".into(),
                 });
             }
         }
         Message::DeleteInstance(id) => {
-            app.data.instances.retain(|instance| instance.id.0 != id);
-            app.notice = store::save(&app.data)
-                .err()
-                .map(|error| format!("Не удалось сохранить удаление: {error}"))
-                .or_else(|| Some("Сборка удалена из библиотеки.".into()));
+            match store::remove_instance(&id) {
+                Ok(()) => {
+                    app.data.instances.retain(|instance| instance.id.0 != id);
+                    if app.data.settings.selected_instance_id.as_deref() == Some(id.as_str()) {
+                        app.data.settings.selected_instance_id = None;
+                    }
+                    app.notice = store::save(&app.data)
+                        .err()
+                        .map(|error| format!("Не удалось сохранить удаление: {error}"))
+                        .or_else(|| Some("Сборка и её рабочая папка удалены.".into()));
+                }
+                Err(error) => app.notice = Some(error),
+            }
         }
         Message::OfflineNameChanged(value) => app.offline_name = value,
         Message::AddOfflineAccount => {
             match store::create_offline_account(&app.offline_name) {
                 Ok(account) => {
                     if app.data.accounts.iter().any(|item| item.id == account.id) {
-                        app.notice = Some("Этот offline-профиль уже добавлен.".into());
+                        app.data.settings.selected_account_id = Some(account.id.clone());
+                        app.notice = store::save(&app.data)
+                            .err()
+                            .map(|error| format!("Не удалось выбрать профиль: {error}"))
+                            .or_else(|| Some("Этот offline-профиль уже добавлен и выбран.".into()));
                     } else {
+                        app.data.settings.selected_account_id = Some(account.id.clone());
                         app.data.accounts.push(account);
                         app.offline_name.clear();
                         app.notice = store::save(&app.data)
@@ -200,6 +229,15 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             }
             app.page = Page::Accounts;
         }
+        Message::SelectAccount(id) => {
+            if app.data.accounts.iter().any(|account| account.id == id) {
+                app.data.settings.selected_account_id = Some(id);
+                app.notice = store::save(&app.data)
+                    .err()
+                    .map(|error| format!("Не удалось сохранить активный аккаунт: {error}"))
+                    .or_else(|| Some("Активный аккаунт изменён.".into()));
+            }
+        }
         Message::DeleteAccount(id) => {
             if let Some(account) = app.data.accounts.iter().find(|item| item.id == id) {
                 if account.kind == AccountKind::Microsoft {
@@ -207,6 +245,9 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 }
             }
             app.data.accounts.retain(|account| account.id != id);
+            if app.data.settings.selected_account_id.as_deref() == Some(id.as_str()) {
+                app.data.settings.selected_account_id = None;
+            }
             app.notice = store::save(&app.data)
                 .err()
                 .map(|error| format!("Не удалось сохранить удаление: {error}"))
@@ -261,6 +302,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     app.client_id.trim().to_owned(),
                     prompt.device_code,
                     prompt.interval,
+                    prompt.expires_in,
                 ),
                 Message::MicrosoftPollFinished,
             );
@@ -268,11 +310,11 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         Message::MicrosoftPollFinished(result) => {
             app.auth_busy = false;
             match result {
-                Ok(PollResult::Pending(message)) => app.notice = Some(message),
                 Ok(PollResult::SignedIn { account, refresh_token }) => {
                     let account_id = account.id.clone();
                     app.data.accounts.retain(|current| current.id != account_id);
                     app.data.accounts.push(account.clone());
+                    app.data.settings.selected_account_id = Some(account_id.clone());
                     app.device_code = None;
 
                     let token_status = match store::store_refresh_token(&account_id, &refresh_token) {
@@ -433,16 +475,17 @@ fn sidebar(app: &App) -> Element<'_, Message> {
     ]
     .spacing(6);
 
-    let current_account = app
-        .data
-        .accounts
-        .first()
+    let selected_account = app.data.settings.selected_account_id.as_ref()
+        .and_then(|id| app.data.accounts.iter().find(|account| &account.id == id));
+    let current_account = selected_account
         .map(|account| account.name.as_str())
         .unwrap_or("Гость");
-    let profile_subtitle = if app.data.accounts.is_empty() {
+    let profile_subtitle = if selected_account.is_some() {
+        "Активный аккаунт"
+    } else if app.data.accounts.is_empty() {
         "Не авторизован"
     } else {
-        "Аккаунт подключён"
+        "Выбери аккаунт"
     };
 
     let profile = container(
@@ -945,7 +988,7 @@ fn right_rail(app: &App) -> Element<'_, Message> {
                 snap: true,
             }),
             news_item("minecraft", "Minecraft Java", "Новости и релизы игры", CYAN),
-            news_item("forge", "Forge и NeoForge", "Обновления загрузчиков", ORANGE),
+            news_item("curseforge", "Forge и NeoForge", "Обновления загрузчиков", ORANGE),
             news_item("horizon", "Horizon", "Новости Rust runtime", PURPLE),
         ]
         .spacing(13),
@@ -954,8 +997,15 @@ fn right_rail(app: &App) -> Element<'_, Message> {
     .width(Length::Fill)
     .style(|_| glass_style(PANEL, EDGE));
 
-    let last_instance = app.data.instances.last().map(|item| item.name.clone()).unwrap_or_else(|| "Пока нет сборок".into());
-    let last_account = app.data.accounts.first().map(|item| item.name.clone()).unwrap_or_else(|| "Не авторизован".into());
+    let last_instance = app.data.settings.selected_instance_id.as_ref()
+        .and_then(|id| app.data.instances.iter().find(|item| &item.id.0 == id))
+        .or_else(|| app.data.instances.last())
+        .map(|item| item.name.clone())
+        .unwrap_or_else(|| "Пока нет сборок".into());
+    let last_account = app.data.settings.selected_account_id.as_ref()
+        .and_then(|id| app.data.accounts.iter().find(|item| &item.id == id))
+        .map(|item| item.name.clone())
+        .unwrap_or_else(|| "Не авторизован".into());
 
     let quick = container(
         column![
@@ -1154,7 +1204,8 @@ fn instances_page(app: &App) -> Element<'_, Message> {
         );
     } else {
         for instance in &app.data.instances {
-            list = list.push(instance_card(instance));
+            let selected = app.data.settings.selected_instance_id.as_deref() == Some(instance.id.0.as_str());
+            list = list.push(instance_card(instance, selected));
         }
     }
 
@@ -1193,7 +1244,7 @@ fn choice_button(label: &'static str, active: bool, message: Message) -> Element
         .into()
 }
 
-fn instance_card(instance: &GameInstance) -> Element<'static, Message> {
+fn instance_card(instance: &GameInstance, selected: bool) -> Element<'static, Message> {
     let platform = match instance.platform {
         GamePlatform::Java => "Minecraft Java",
         GamePlatform::Horizon => "Minecraft Horizon",
@@ -1227,6 +1278,11 @@ fn instance_card(instance: &GameInstance) -> Element<'static, Message> {
             ]
             .spacing(4),
             Space::new().width(Length::Fill),
+            if selected {
+                status_chip("АКТИВНА", CYAN_DARK, CYAN)
+            } else {
+                quiet_button("Выбрать", Message::SelectInstance(account_id.clone()))
+            },
             button(icon("play", CYAN, 15.0))
                 .on_press(Message::LaunchInstance(account_id.clone()))
                 .width(36)
@@ -1362,7 +1418,8 @@ fn accounts_page(app: &App) -> Element<'_, Message> {
         );
     } else {
         for account in &app.data.accounts {
-            account_list = account_list.push(account_card(account));
+            let selected = app.data.settings.selected_account_id.as_deref() == Some(account.id.as_str());
+            account_list = account_list.push(account_card(account, selected));
         }
     }
 
@@ -1401,7 +1458,7 @@ fn microsoft_device_code(app: &App) -> Element<'_, Message> {
     .into()
 }
 
-fn account_card(account: &AccountProfile) -> Element<'static, Message> {
+fn account_card(account: &AccountProfile, selected: bool) -> Element<'static, Message> {
     let (kind_label, accent) = match account.kind {
         AccountKind::Offline => ("OFFLINE", PURPLE),
         AccountKind::Microsoft => ("MICROSOFT", CYAN),
@@ -1425,6 +1482,11 @@ fn account_card(account: &AccountProfile) -> Element<'static, Message> {
             ]
             .spacing(4),
             Space::new().width(Length::Fill),
+            if selected {
+                status_chip("АКТИВЕН", CYAN_DARK, CYAN)
+            } else {
+                quiet_button("Выбрать", Message::SelectAccount(id.clone()))
+            },
             button(icon("trash", RED, 14.0))
                 .on_press(Message::DeleteAccount(id))
                 .width(34)
@@ -1649,6 +1711,11 @@ fn icon(
     size: f32,
 ) -> Element<'static, Message> {
     let path = match name {
+        "java" => "M6 3c-2 4 3 5 0 9 M12 2c-2 4 3 6 0 10 M18 3c-2 4 3 5 0 9 M5 15h14l-2 5H7l-2-5Z M3 22h18",
+        "minecraft" => "M12 2 22 7.5v9L12 22 2 16.5v-9L12 2Z M2 7.5l10 5.5 10-5.5 M12 13v9 M7 4.8l10 5.5",
+        "modrinth" => "M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z M7.5 7.5h1 M16.5 7.5h1 M7.5 16.5h1 M16.5 16.5h1",
+        "curseforge" => "M12 2c3 4-2 6 1 9 2-2 4-3 4-6 4 5 5 10 1 14-4 4-11 3-13-2-2-4 0-9 4-12 0 4 1 5 3 6 1-3-1-5 0-9Z",
+        "discord" => "M7 7c3-2 7-2 10 0l2 10c-3 2-11 2-14 0L7 7Z M9 12h.01 M15 12h.01 M8 8 6 5 M16 8l2-3",
         "diamond" => "M12 2 21 9 12 22 3 9 12 2Z M3 9h18 M8 9l4 13 4-13 M8 9l4-7 4 7",
         "home" => "M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3V10.5Z",
         "instances" => "M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z",
