@@ -2083,7 +2083,7 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
             text(if account.kind == AccountKind::Microsoft {
                 "Для Microsoft-аккаунта скин можно отправить в официальный профиль Minecraft."
             } else {
-                "GlowstoneCL применяет скин в Horizon Offline напрямую, а в совместимых версиях Java автоматически устанавливает Fabric и OfflineSkins."
+                "Для Java GlowstoneCL применяет скин через Java-agent прямо в обычном клиенте — без Fabric/Forge-модов. Horizon Offline поддерживает скин встроенно."
             })
                 .size(9)
                 .color(MUTED),
@@ -2309,7 +2309,7 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
         text(if account.kind == AccountKind::Microsoft {
             "Для Microsoft выбранный скин отправляется в официальный профиль Minecraft Services."
         } else {
-            "Для Java автоматическая установка OfflineSkins сейчас доступна для 1.21.6–1.21.11 и 26.1–26.3 через Fabric. Vanilla-профиль GlowstoneCL подготовит с Fabric автоматически; Forge/NeoForge и более старые версии пока не поддерживаются. Horizon Offline получает скин напрямую."
+            "Для Java используется OfflineSkinInjector — отдельный Java-agent, а не Minecraft-мод; он работает с Vanilla и загрузчиками, не добавляя файлы в mods. Поддержка старых и новых версий зависит от authlib игры (1.6.2 и старше не поддерживаются). Horizon Offline применяет скин встроенным механизмом."
         })
             .size(8)
             .color(SUBTLE),
