@@ -25,7 +25,7 @@ The `test/glowstonecl` branch includes:
 - Microsoft browser sign-in through CrustCore using the official Minecraft Launcher public client by default (optional custom Client ID), followed by Xbox Live, XSTS and Minecraft Services, including ownership / Game Pass checks;
 - Microsoft refresh-token storage in the operating system credential store, with session refresh before launching a game;
 - offline profiles for Java offline-mode play and the separate Horizon Offline fork;
-- a skin wardrobe for offline and Microsoft profiles, with per-profile PNG collections, current-skin sync for Microsoft accounts, official Minecraft Services upload, and a textured rotatable 3D player preview. Offline skins are applied directly by Horizon Offline; on Minecraft Java 1.21.6–1.21.11 and 26.1–26.3, GlowstoneCL installs the compatible Fabric OfflineSkins client mod and configures the local texture automatically. Vanilla Java profiles are switched to Fabric for this feature; other loaders and older versions are not yet supported.
+- a skin wardrobe for offline and Microsoft profiles, with per-profile PNG collections, current-skin sync for Microsoft accounts, official Minecraft Services upload, and a textured rotatable 3D player preview. Offline skins are applied directly by Horizon Offline. For ordinary Minecraft Java, GlowstoneCL uses the standalone [OfflineSkinInjector](https://github.com/NaivG/OfflineSkinInjector) Java agent: no Fabric/Forge skin mod is installed and no `mods/` folder entry is needed. Its upstream 0.1.2 JAR is downloaded on demand and checked against a pinned SHA-256 before launch. The injector works at runtime with supported authlib generations across Vanilla and mod-loader clients; the skin is client-side only.
 
 The Horizon game binary is currently provided for **Linux x86_64** and **Windows x64**. The Java backend supports the platform/runtime combinations provided by CrustCore.
 
@@ -99,6 +99,10 @@ A custom Microsoft Application (client) ID is optional. GlowstoneCL uses CrustCo
 | Mod and modpack installation / updates | Planned |
 | Download queue, detailed progress and logs UI | Planned |
 | Installers and distribution packages | Planned |
+
+## Third-party components
+
+Offline Java skin rendering uses the separate [OfflineSkinInjector](https://github.com/NaivG/OfflineSkinInjector) project (GPL-3.0). GlowstoneCL downloads its unmodified upstream release JAR at runtime and verifies its SHA-256; the JAR includes the GPL-3.0 license. See the upstream repository for its source and compatibility table. Horizon Offline uses its own built-in local-skin interface and does not need this agent.
 
 ## Licensing
 
