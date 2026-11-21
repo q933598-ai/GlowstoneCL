@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use iced::widget::{
-    button, canvas, column, container, image, row, rule, scrollable, stack, svg, text,
+    button, canvas, column, container, image, mouse_area, row, rule, scrollable, stack, svg, text,
     text_input, Space,
 };
 use iced::{
@@ -87,6 +87,8 @@ pub enum Message {
     HorizonModInstallFinished(String, Result<Vec<horizon_mods::InstalledHorizonMod>, String>),
     RemoveHorizonMod(String, String),
     CreateInstance,
+    OpenCreateInstance,
+    CloseCreateInstance,
     SelectInstance(String),
     LaunchInstance(String),
     LaunchFinished(String, Result<LaunchOutcome, String>),
@@ -166,6 +168,7 @@ pub struct App {
     skin_name: String,
     rename_skin_name: String,
     skin_model: store::SkinModel,
+    show_instance_creator: bool,
     wardrobe_preview: Option<std::sync::Arc<Vec<[u8; 4]>>>,
     wardrobe_skin_previews: HashMap<String, std::sync::Arc<Vec<[u8; 4]>>>,
     wardrobe_angle: f32,
@@ -230,6 +233,7 @@ impl Default for App {
             skin_name: String::new(),
             rename_skin_name: String::new(),
             skin_model: store::SkinModel::Classic,
+            show_instance_creator: false,
             wardrobe_preview: wardrobe_selected_skin_id.as_ref()
                 .and_then(|id| wardrobe_skin_previews.get(id).cloned()),
             wardrobe_skin_previews,
@@ -581,6 +585,22 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 }
             }
         }
+        Message::OpenCreateInstance => {
+            app.show_instance_creator = true;
+            app.notice = None;
+            if app.version_platform != Some(app.platform.into()) {
+                let platform = app.platform.into();
+                app.versions_busy = true;
+                app.versions_error = None;
+                return iced::Task::perform(
+                    game::available_versions(platform),
+                    move |result| Message::VersionCatalogLoaded(platform, result),
+                );
+            }
+        }
+        Message::CloseCreateInstance => {
+            app.show_instance_creator = false;
+        }
         Message::CreateInstance => {
             let name = app.instance_name.trim().to_owned();
             let version = app.instance_version.trim().to_owned();
@@ -595,6 +615,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                         match store::save(&app.data) {
                             Ok(()) => {
                                 app.instance_name.clear();
+                                app.show_instance_creator = false;
                                 app.notice = Some("Сборка создана и сохранена.".into());
                             }
                             Err(error) => {
@@ -2371,9 +2392,15 @@ fn instances_page(app: &App) -> Element<'_, Message> {
     let form = container(
         column![
             row![
-                text("Создать сборку").size(16).color(TEXT),
+                column![
+                    text("Новая сборка").size(15).color(TEXT),
+                    text("Создай отдельный профиль с собственными модами, настройками и мирами.")
+                        .size(9).color(MUTED),
+                ]
+                .spacing(3),
                 Space::new().width(Length::Fill),
                 status_chip("НОВЫЙ ПРОФИЛЬ", CYAN_DARK, CYAN),
+                quiet_button("Закрыть", Message::CloseCreateInstance),
             ]
             .align_y(Alignment::Center),
             text("Название").size(9).color(MUTED),
@@ -2423,59 +2450,94 @@ fn instances_page(app: &App) -> Element<'_, Message> {
             .spacing(8),
             text("Загрузчик").size(9).color(MUTED),
             loader_buttons,
-            primary_button("Создать сборку", Message::CreateInstance),
-            text("Первый запуск автоматически загрузит нужные файлы игры, библиотеки и Java Runtime.")
-                .size(9)
-                .color(SUBTLE),
+            row![
+                Space::new().width(Length::Fill),
+                quiet_button("Отмена", Message::CloseCreateInstance),
+                primary_button("Создать сборку", Message::CreateInstance),
+            ]
+            .spacing(8),
         ]
         .spacing(8),
     )
-    .padding(18)
+    .padding(16)
     .width(Length::Fill)
-    .style(|_| glass_style(PANEL, EDGE));
+    .style(|_| glass_style(PANEL, EDGE_BRIGHT));
 
-    let mut list = column![
-        row![
-            column![
-                text("Твоя библиотека").size(16).color(TEXT),
-                text(format!("{} игровых профилей", app.data.instances.len())).size(9).color(MUTED),
-            ]
-            .spacing(2),
-            Space::new().width(Length::Fill),
+    let toolbar = row![
+        column![
+            text("Мои сборки").size(20).color(TEXT),
+            text(format!("{} игровых профилей · Java и Horizon хранятся отдельно", app.data.instances.len()))
+                .size(9).color(MUTED),
         ]
-        .align_y(Alignment::Center),
+        .spacing(3),
+        Space::new().width(Length::Fill),
+        primary_button("＋ Создать сборку", Message::OpenCreateInstance),
     ]
-    .spacing(10)
-    .width(Length::Fill);
+    .align_y(Alignment::Center);
 
+    let creator: Element<'_, Message> = if app.show_instance_creator {
+        form.into()
+    } else {
+        Space::new().height(0).into()
+    };
+
+    let mut list = column![].spacing(9).width(Length::Fill);
     if app.data.instances.is_empty() {
         list = list.push(
             container(
                 column![
-                    icon("instances", SUBTLE, 28.0),
-                    text("Пока нет сборок").size(13).color(TEXT),
-                    text("Создай профиль выше. Java и Horizon будут храниться независимо.")
+                    icon("instances", SUBTLE, 30.0),
+                    text("Библиотека пока пустая").size(14).color(TEXT),
+                    text("Создай первую сборку кнопкой сверху или щёлкни правой кнопкой по свободной области.")
                         .size(9)
                         .color(MUTED),
+                    primary_button("＋ Создать первую сборку", Message::OpenCreateInstance),
                 ]
-                .spacing(8)
+                .spacing(9)
                 .align_x(Alignment::Center),
             )
-            .padding(24)
+            .padding(25)
             .width(Length::Fill)
             .style(|_| glass_style(PANEL, EDGE)),
         );
     } else {
-        for instance in &app.data.instances {
+        let mut sorted: Vec<_> = app.data.instances.iter().collect();
+        sorted.sort_by_key(|instance| {
+            app.data.settings.selected_instance_id.as_deref() != Some(instance.id.0.as_str())
+        });
+        for instance in sorted {
             let selected = app.data.settings.selected_instance_id.as_deref() == Some(instance.id.0.as_str());
             list = list.push(instance_card(instance, selected));
         }
     }
 
-    column![form, list]
-        .spacing(16)
+    // A dedicated empty strip below the profile list acts as a context-menu target.
+    // Right-clicking it opens the same real profile creator as the toolbar button.
+    let context_strip = mouse_area(
+        container(
+            row![
+                icon("plus", SUBTLE, 14.0),
+                text("Правая кнопка мыши — создать сборку").size(8).color(SUBTLE),
+                Space::new().width(Length::Fill),
+            ]
+            .align_y(Alignment::Center)
+            .padding([10, 12]),
+        )
         .width(Length::Fill)
-        .into()
+        .style(|_| glass_style(Color::from_rgba(1.0, 1.0, 1.0, 0.22), EDGE)),
+    )
+    .on_right_press(Message::OpenCreateInstance)
+    .interaction(iced::mouse::Interaction::ContextMenu);
+
+    column![
+        toolbar,
+        creator,
+        list,
+        context_strip,
+    ]
+    .spacing(12)
+    .width(Length::Fill)
+    .into()
 }
 
 fn loader_button(loader: LoaderKind, current: LoaderKind) -> Element<'static, Message> {
