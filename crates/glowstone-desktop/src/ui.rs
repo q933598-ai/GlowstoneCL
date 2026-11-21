@@ -265,6 +265,9 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
     match message {
         Message::Navigate(page) => {
             app.page = page;
+            if page == Page::News {
+                app.selected_news = None;
+            }
             app.notice = None;
             if page == Page::Wardrobe {
                 ensure_wardrobe_account(app);
@@ -2017,8 +2020,8 @@ fn news_item(index: usize, entry: &NewsEntry) -> Element<'static, Message> {
     .on_press(Message::OpenNews(index))
     .width(Length::Fill)
     .padding(3)
-    .style(|theme, _| {
-        let mut style = button::text(theme, button::Status::Active);
+    .style(|theme, status| {
+        let mut style = button::text(theme, status);
         style.background = Some(Color::TRANSPARENT.into());
         style.text_color = TEXT;
         style
