@@ -123,6 +123,7 @@ pub enum Message {
     MicrosoftPollFinished(Result<PollResult, String>),
     ToggleFavorite(String),
     OpenNews(usize),
+    RefreshRecentPlays,
     Info(&'static str),
 }
 
@@ -1150,10 +1151,25 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 app.notice = None;
             }
         }
+        Message::RefreshRecentPlays => {
+            let latest = store::load_recent_plays();
+            if latest != app.recent_plays {
+                app.recent_plays = latest;
+            }
+        }
         Message::Info(message) => app.notice = Some(message.to_owned()),
     }
 
     iced::Task::none()
+}
+
+pub fn subscription(app: &App) -> iced::Subscription<Message> {
+    if app.launch_busy.is_some() {
+        iced::time::every(std::time::Duration::from_secs(1))
+            .map(|_| Message::RefreshRecentPlays)
+    } else {
+        iced::Subscription::none()
+    }
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
