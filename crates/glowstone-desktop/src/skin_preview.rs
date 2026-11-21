@@ -169,7 +169,7 @@ fn add_cube(
     face_size: (u32, u32),
     _overlay: bool,
 ) {
-    let (face_width, face_height) = face_size;
+    let face_width = face_size.0;
     let face_depth = (max.z - min.z) as u32;
     let face_height = (max.y - min.y) as u32;
     add_front_face(
