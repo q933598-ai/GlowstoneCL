@@ -17,22 +17,22 @@ use crate::horizon_mods;
 use crate::mods;
 use crate::store::{self, AccountKind, AccountProfile, PersistedState};
 
-const BG: Color = Color::from_rgb8(237, 239, 242);
-const SIDEBAR: Color = Color::from_rgba(0.97, 0.975, 0.985, 0.91);
+const BG: Color = Color::from_rgb8(242, 242, 239);
+const SIDEBAR: Color = Color::from_rgba(0.985, 0.985, 0.98, 0.90);
 const PANEL: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.73);
-const PANEL_LIGHT: Color = Color::from_rgba(0.94, 0.96, 0.975, 0.84);
+const PANEL_LIGHT: Color = Color::from_rgba(0.955, 0.955, 0.945, 0.86);
 const TEXT: Color = Color::from_rgb8(47, 54, 62);
 const MUTED: Color = Color::from_rgb8(104, 114, 126);
 const SUBTLE: Color = Color::from_rgb8(137, 146, 157);
-const CYAN: Color = Color::from_rgb8(80, 145, 164);
-const CYAN_DARK: Color = Color::from_rgb8(218, 234, 238);
-const PURPLE: Color = Color::from_rgb8(142, 127, 170);
+const CYAN: Color = Color::from_rgb8(105, 108, 108);
+const CYAN_DARK: Color = Color::from_rgb8(231, 232, 228);
+const PURPLE: Color = Color::from_rgb8(157, 145, 128);
 const GREEN: Color = Color::from_rgb8(93, 151, 111);
 const ORANGE: Color = Color::from_rgb8(191, 137, 94);
 const RED: Color = Color::from_rgb8(190, 101, 111);
 const EDGE: Color = Color::from_rgba(0.31, 0.39, 0.47, 0.15);
-const EDGE_BRIGHT: Color = Color::from_rgba(0.35, 0.62, 0.71, 0.46);
-const DIVIDER: Color = Color::from_rgba(0.35, 0.42, 0.49, 0.14);
+const EDGE_BRIGHT: Color = Color::from_rgba(0.47, 0.48, 0.45, 0.34);
+const DIVIDER: Color = Color::from_rgba(0.36, 0.36, 0.34, 0.13);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -1547,19 +1547,19 @@ impl<Message> canvas::Program<Message> for GlowBackdrop {
             &mut frame,
             iced::Point::new(bounds.width * 0.72, bounds.height * 0.12),
             440.0,
-            Color::from_rgb8(183, 208, 216),
+            Color::from_rgb8(224, 224, 220),
         );
         draw_glow(
             &mut frame,
             iced::Point::new(bounds.width * 0.42, bounds.height * 0.95),
             360.0,
-            Color::from_rgb8(211, 202, 224),
+            Color::from_rgb8(229, 225, 217),
         );
         draw_glow(
             &mut frame,
             iced::Point::new(bounds.width * 0.98, bounds.height * 0.72),
             280.0,
-            Color::from_rgb8(184, 218, 216),
+            Color::from_rgb8(233, 231, 224),
         );
         vec![frame.into_geometry()]
     }
@@ -1748,7 +1748,7 @@ fn nav_button(
 ) -> Element<'static, Message> {
     let active = page == current;
     let background = if active {
-        Color::from_rgba(0.80, 0.89, 0.92, 0.92)
+        Color::from_rgba(0.91, 0.91, 0.89, 0.94)
     } else {
         Color::TRANSPARENT
     };
@@ -2787,15 +2787,19 @@ fn instances_page(app: &App) -> Element<'_, Message> {
     let context_strip = mouse_area(
         container(
             row![
-                icon("plus", SUBTLE, 14.0),
-                text("Правая кнопка мыши — создать сборку").size(8).color(SUBTLE),
+                icon("plus", SUBTLE, 16.0),
+                text("Пустая область · правая кнопка мыши — создать сборку")
+                    .size(9)
+                    .color(SUBTLE),
                 Space::new().width(Length::Fill),
             ]
             .align_y(Alignment::Center)
-            .padding([10, 12]),
+            .padding([14, 16]),
         )
         .width(Length::Fill)
-        .style(|_| glass_style(Color::from_rgba(1.0, 1.0, 1.0, 0.22), EDGE)),
+        .height(Length::Fixed(168.0))
+        .align_y(Alignment::Center)
+        .style(|_| glass_style(Color::from_rgba(1.0, 1.0, 1.0, 0.16), EDGE)),
     )
     .on_right_press(Message::OpenCreateInstance)
     .interaction(iced::mouse::Interaction::ContextMenu);
@@ -3257,7 +3261,7 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
                 .padding(10)
                 .width(Length::Fill)
                 .style(move |_| glass_style(
-                    if selected { Color::from_rgba(0.12, 0.23, 0.34, 0.92) } else { PANEL },
+                    if selected { Color::from_rgba(0.91, 0.92, 0.90, 0.96) } else { PANEL },
                     if selected { EDGE_BRIGHT } else { EDGE },
                 )),
             );
@@ -3608,7 +3612,7 @@ fn source_tab(label: &'static str, active: bool, message: Message) -> Element<'s
         .style(move |theme, status| {
             let mut style = button::secondary(theme, status);
             style.background = Some(if active {
-                Color::from_rgba(0.83, 0.90, 0.92, 0.94)
+                Color::from_rgba(0.91, 0.91, 0.89, 0.96)
             } else {
                 Color::from_rgba(1.0, 1.0, 1.0, 0.56)
             }.into());
@@ -4365,7 +4369,7 @@ fn primary_button(label: &'static str, message: Message) -> Element<'static, Mes
             let mut style = button::secondary(theme, status);
             style.background = Some(
                 if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                    Color::from_rgba(0.91, 0.97, 0.98, 0.96)
+                    Color::from_rgba(0.93, 0.94, 0.92, 0.97)
                 } else {
                     Color::from_rgba(1.0, 1.0, 1.0, 0.78)
                 }
@@ -4391,9 +4395,9 @@ fn tonal_button(label: &'static str, message: Message) -> Element<'static, Messa
             let mut style = button::secondary(theme, status);
             style.background = Some(
                 if matches!(status, button::Status::Hovered) {
-                    Color::from_rgba(0.95, 0.97, 0.98, 0.96)
+                    Color::from_rgba(0.985, 0.985, 0.975, 0.97)
                 } else {
-                    Color::from_rgba(0.95, 0.965, 0.975, 0.70)
+                    Color::from_rgba(0.95, 0.95, 0.935, 0.78)
                 }
                 .into(),
             );
