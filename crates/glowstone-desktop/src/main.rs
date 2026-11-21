@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod auth;
+mod store;
 mod ui;
 
 fn main() -> iced::Result {
@@ -8,6 +10,8 @@ fn main() -> iced::Result {
     iced::application(ui::App::default, ui::update, ui::view)
         .title("GlowstoneCL")
         .theme(iced::Theme::Dark)
+        .default_font(iced::Font::with_name("Noto Sans"))
+        .default_text_size(13)
         .window_size(iced::Size::new(1600.0, 900.0))
         .centered()
         .run()
