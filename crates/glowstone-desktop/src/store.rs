@@ -745,6 +745,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn legacy_instance_json_without_loader_pin_still_deserializes() {
+        let instance: GameInstance = serde_json::from_str(
+            r#"{
+                "id": "123e4567-e89b-12d3-a456-426614174000",
+                "name": "Legacy Fabric",
+                "platform": "java",
+                "game_version": "1.20.1",
+                "loader": "fabric",
+                "state": "not_installed"
+            }"#
+        ).unwrap();
+        assert_eq!(instance.loader_version, None);
+        assert_eq!(instance.loader, LoaderKind::Fabric);
+    }
+
+    #[test]
     fn offline_account_uses_validated_name_and_deterministic_uuid() {
         let first = create_offline_account("GlowPlayer").unwrap();
         let second = create_offline_account("GlowPlayer").unwrap();
