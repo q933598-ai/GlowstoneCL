@@ -64,11 +64,181 @@ impl HorizonFlavor {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionChoice {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MojangVersionManifest {
+    latest: MojangLatestVersions,
+    versions: Vec<MojangVersionEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MojangLatestVersions {
+    release: String,
+    snapshot: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MojangVersionEntry {
+    id: String,
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default, rename = "releaseTime")]
+    release_time: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct LaunchOutcome {
     pub instance_id: String,
     pub platform: GamePlatform,
     pub exit_code: Option<i32>,
+}
+
+/// Fetch the selectable game versions for the requested runtime. Lists are cached so
+/// already-seen versions remain available when Mojang or GitHub is temporarily offline.
+pub async fn available_versions(platform: GamePlatform) -> Result<Vec<VersionChoice>, String> {
+    let root = store::app_data_dir()?.join("version-catalog");
+    tokio::fs::create_dir_all(&root)
+        .await
+        .map_err(|error| format!("Не удалось создать кеш версий: {error}"))?;
+
+    let client = reqwest::Client::builder()
+        .user_agent("GlowstoneCL/0.1.0 (https://github.com/q933598-ai/GlowstoneCL)")
+        .build()
+        .map_err(|error| error.to_string())?;
+
+    match platform {
+        GamePlatform::Java => {
+            let path = root.join("minecraft-java.json");
+            let value = fetch_json_cached(
+                &client,
+                "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
+                &path,
+            )
+            .await?;
+            let manifest: MojangVersionManifest = serde_json::from_value(value)
+                .map_err(|error| format!("Список Minecraft от Mojang повреждён: {error}"))?;
+
+            let mut versions = vec![
+                VersionChoice {
+                    id: "stable".to_owned(),
+                    label: format!("Последний релиз · {}", manifest.latest.release),
+                    kind: "Последний релиз".to_owned(),
+                },
+                VersionChoice {
+                    id: "snapshot".to_owned(),
+                    label: format!("Последний snapshot · {}", manifest.latest.snapshot),
+                    kind: "Последний snapshot".to_owned(),
+                },
+            ];
+            for entry in manifest.versions {
+                let kind = match entry.kind.as_str() {
+                    "release" => "Релиз",
+                    "snapshot" => "Snapshot",
+                    "old_beta" => "Старая Beta",
+                    "old_alpha" => "Старая Alpha / Classic",
+                    _ => continue,
+                };
+                versions.push(VersionChoice {
+                    id: entry.id.clone(),
+                    label: if entry.release_time.is_empty() {
+                        format!("{} · {}", entry.id, kind)
+                    } else {
+                        format!("{} · {} · {}", entry.id, kind, &entry.release_time[..10.min(entry.release_time.len())])
+                    },
+                    kind: kind.to_owned(),
+                });
+            }
+            Ok(versions)
+        }
+        GamePlatform::Horizon => fetch_horizon_version_choices(&client, &root.join("horizon-official.json"), HorizonFlavor::Official).await,
+        GamePlatform::HorizonOffline => fetch_horizon_version_choices(&client, &root.join("horizon-offline.json"), HorizonFlavor::Offline).await,
+    }
+}
+
+async fn fetch_json_cached(
+    client: &reqwest::Client,
+    url: &str,
+    cache_path: &Path,
+) -> Result<Value, String> {
+    let network_result = async {
+        client
+            .get(url)
+            .send()
+            .await
+            .map_err(|error| error.to_string())?
+            .error_for_status()
+            .map_err(|error| error.to_string())?
+            .json::<Value>()
+            .await
+            .map_err(|error| error.to_string())
+    }
+    .await;
+
+    match network_result {
+        Ok(value) => {
+            if let Some(parent) = cache_path.parent() {
+                let _ = tokio::fs::create_dir_all(parent).await;
+            }
+            if let Ok(bytes) = serde_json::to_vec(&value) {
+                let _ = tokio::fs::write(cache_path, bytes).await;
+            }
+            Ok(value)
+        }
+        Err(network_error) => {
+            let bytes = tokio::fs::read(cache_path).await.map_err(|_| {
+                format!("Не удалось получить список версий ({network_error}), локального кеша пока нет.")
+            })?;
+            serde_json::from_slice(&bytes)
+                .map_err(|error| format!("Кеш списка версий повреждён: {error}"))
+        }
+    }
+}
+
+async fn fetch_horizon_version_choices(
+    client: &reqwest::Client,
+    cache_path: &Path,
+    flavor: HorizonFlavor,
+) -> Result<Vec<VersionChoice>, String> {
+    let value = fetch_json_cached(
+        client,
+        &format!("https://api.github.com/repos/{}/releases?per_page=100", match flavor {
+            HorizonFlavor::Official => "horizon-rust/horizon",
+            HorizonFlavor::Offline => "gerdaroot/Horizon-Offline-Launcher",
+        }),
+        cache_path,
+    )
+    .await?;
+    let releases: Vec<GithubRelease> = serde_json::from_value(value)
+        .map_err(|error| format!("Список релизов Horizon повреждён: {error}"))?;
+    let asset_name = horizon_asset_name()?;
+    let mut choices = vec![VersionChoice {
+        id: "stable".to_owned(),
+        label: "Последняя сборка".to_owned(),
+        kind: "Последняя сборка".to_owned(),
+    }];
+    for release in releases {
+        if !release.assets.iter().any(|asset| asset.name == asset_name) {
+            continue;
+        }
+        let id = horizon_release_version(&release)?;
+        let kind = if release.title.starts_with("Nightly ") {
+            "Nightly"
+        } else {
+            "Стабильный релиз"
+        };
+        choices.push(VersionChoice {
+            label: format!("{id} · {kind}"),
+            id,
+            kind: kind.to_owned(),
+        });
+    }
+    Ok(choices)
 }
 
 /// Refreshes Microsoft credentials immediately before launch. Tokens are never
