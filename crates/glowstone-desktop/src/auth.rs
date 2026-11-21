@@ -402,7 +402,7 @@ pub async fn refresh_game_account(
         return Err("Сначала укажи Microsoft Client ID в разделе «Аккаунты».".to_owned());
     }
 
-    let authenticator = Authenticator::with_client_id(client_id)
+    let authenticator = Authenticator::with_client_id(client_id.clone())
         .map_err(|error| format!("Не удалось инициализировать Microsoft: {error}"))?;
 
     // An empty, expired access token forces CrustCore to exchange the stored
