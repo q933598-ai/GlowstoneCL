@@ -271,7 +271,7 @@ impl Default for App {
             wardrobe_account_id,
             wardrobe_skins: wardrobe_collection.skins,
             wardrobe_active_skin_id: wardrobe_collection.active_skin_id,
-            wardrobe_selected_skin_id,
+            wardrobe_selected_skin_id: wardrobe_selected_skin_id.clone(),
             skin_name: String::new(),
             rename_skin_name: String::new(),
             skin_model: store::SkinModel::Classic,
