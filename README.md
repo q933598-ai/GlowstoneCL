@@ -19,7 +19,7 @@ The `test/glowstonecl` branch includes:
 - first-launch installation and launch of Vanilla, Fabric, Quilt, Forge and NeoForge profiles;
 - **Horizon installation and launch**: the latest supported official Nightly is downloaded, its version-bound Ed25519 signature and archive SHA-256 are checked, and the binary's Launch API is queried before use;
 - automatic download of the Mojang game files and Java version required by Horizon, followed by resource preparation and launch through `--session-stdin`;
-- Microsoft Device Code sign-in through Xbox Live, XSTS and Minecraft Services, including Java ownership / Game Pass product checks;
+- Microsoft browser sign-in using Device Code Flow, with automatic browser opening and background polling, followed by Xbox Live, XSTS and Minecraft Services, including Java ownership / Game Pass product checks;
 - Microsoft refresh-token storage in the operating system credential store, with session refresh before launching a game;
 - offline profiles for Java offline-mode play.
 
