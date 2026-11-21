@@ -390,6 +390,21 @@ async fn launch_java(
     })
 }
 
+fn validate_horizon_build_pin(
+    flavor: HorizonFlavor,
+    minecraft_version: &str,
+    java_major: u32,
+) -> Result<(), String> {
+    if flavor == HorizonFlavor::Offline
+        && (minecraft_version != "26.3" || java_major != 25)
+    {
+        return Err(format!(
+            "Horizon Offline поддерживает Minecraft 26.3 и Java 25. Эта сборка закрепляет Minecraft {minecraft_version} / Java {java_major}."
+        ));
+    }
+    Ok(())
+}
+
 fn java_version_selector(input: &str) -> String {
     match input.trim().to_ascii_lowercase().as_str() {
         "stable" | "latest" | "release" | "latest release" => "latest_release".to_owned(),
@@ -480,12 +495,7 @@ async fn launch_horizon(
     )
     .await?;
     let pins = build.pins()?;
-    if flavor == HorizonFlavor::Offline && (pins.version != "26.3" || pins.java_major != 25) {
-        return Err(format!(
-            "Эта сборка Horizon Offline рассчитана на Minecraft 26.3 и Java 25, а выбранный runtime закрепляет Minecraft {} / Java {}.",
-            pins.version, pins.java_major
-        ));
-    }
+    validate_horizon_build_pin(flavor, &pins.version, pins.java_major)?;
 
     let client_api = query_launch_api(&build.client(), &build.directory).await?;
     let client_version = client_api["minecraft"]
@@ -1375,11 +1385,52 @@ mod tests {
     }
 
     #[test]
-    fn horizon_profiles_must_match_the_release_minecraft_pin() {
-        assert!(validate_horizon_version("stable", "26.3").is_ok());
-        assert!(validate_horizon_version("latest", "26.3").is_ok());
-        assert!(validate_horizon_version("26.3", "26.3").is_ok());
-        assert!(validate_horizon_version("1.21.1", "26.3").is_err());
+    fn offline_fork_is_pinned_to_minecraft_26_3_and_java_25() {
+        assert!(validate_horizon_build_pin(HorizonFlavor::Offline, "26.3", 25).is_ok());
+        assert!(validate_horizon_build_pin(HorizonFlavor::Offline, "1.21.1", 25).is_err());
+        assert!(validate_horizon_build_pin(HorizonFlavor::Offline, "26.3", 21).is_err());
+        assert!(validate_horizon_build_pin(HorizonFlavor::Official, "26.3", 25).is_ok());
+    }
+
+    #[test]
+    fn horizon_release_ids_distinguish_nightly_and_tagged_builds() {
+        let nightly: GithubRelease = serde_json::from_str(
+            r#"{"name":"Nightly 2026-11-21 · 8f83e5c","tag_name":"nightly","assets":[]}"#,
+        ).unwrap();
+        assert_eq!(
+            horizon_release_version(&nightly).unwrap(),
+            "nightly-2026-11-21-8f83e5c"
+        );
+
+        let tagged: GithubRelease = serde_json::from_str(
+            r#"{"name":"Horizon v0.2.97.1","tag_name":"v0.2.97.1","assets":[]}"#,
+        ).unwrap();
+        assert_eq!(horizon_release_version(&tagged).unwrap(), "v0.2.97.1");
+    }
+
+    #[test]
+    fn horizon_release_selection_skips_launcher_and_mod_sdk_releases() {
+        let releases: Vec<GithubRelease> = serde_json::from_str(
+            r#"[
+                {"name":"Horizon launcher 0.2.96","tag_name":"launcher@0.2.96","assets":[{"name":"horizon-launcher-linux-x86_64.tar.gz","browser_download_url":"https://example.invalid/launcher"}]},
+                {"name":"Mod SDK 8f83e5c85a","tag_name":"sdk-8f83e5c","assets":[{"name":"sdk.json","browser_download_url":"https://example.invalid/sdk"}]},
+                {"name":"Nightly 2026-11-21 · 8f83e5c","tag_name":"nightly","assets":[{"name":"horizon-linux-x86_64.tar.gz","browser_download_url":"https://example.invalid/game"}]}
+            ]"#,
+        ).unwrap();
+
+        assert_eq!(
+            horizon_release_version(select_horizon_release(
+                &releases,
+                "stable",
+                "horizon-linux-x86_64.tar.gz"
+            ).unwrap()).unwrap(),
+            "nightly-2026-11-21-8f83e5c"
+        );
+        assert!(select_horizon_release(
+            &releases,
+            "launcher@0.2.96",
+            "horizon-linux-x86_64.tar.gz"
+        ).is_err());
     }
 
     #[test]
