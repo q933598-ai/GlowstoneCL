@@ -220,6 +220,7 @@ pub fn create_instance(
         platform,
         game_version: version,
         loader,
+        loader_version: None,
         state: InstanceState::NotInstalled,
     };
 
@@ -252,6 +253,19 @@ pub fn create_instance(
         .map_err(|error| format!("Не удалось записать instance.json: {error}"))?;
 
     Ok(instance)
+}
+
+pub fn save_instance_metadata(instance: &GameInstance) -> Result<(), String> {
+    instance.validate().map_err(|error| error.to_string())?;
+    let path = instance_directory(&instance.id.0)?.join("instance.json");
+    let bytes = serde_json::to_vec_pretty(instance)
+        .map_err(|error| format!("Не удалось сериализовать метаданные сборки: {error}"))?;
+    let temporary = path.with_extension("json.tmp");
+    fs::write(&temporary, bytes)
+        .map_err(|error| format!("Не удалось записать метаданные сборки: {error}"))?;
+    fs::rename(&temporary, &path)
+        .map_err(|error| format!("Не удалось сохранить метаданные сборки: {error}"))?;
+    Ok(())
 }
 
 pub fn remove_instance(instance_id: &str) -> Result<(), String> {
