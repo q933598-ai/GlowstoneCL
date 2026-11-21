@@ -1,5 +1,5 @@
 use iced::widget::{
-    button, canvas, column, container, row, rule, scrollable, text, Space,
+    button, canvas, column, container, row, scrollable, text, Space,
 };
 use iced::{
     Alignment, Border, Color, Element, Length, Rectangle, Shadow, Vector,
