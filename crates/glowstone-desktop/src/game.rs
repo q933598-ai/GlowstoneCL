@@ -92,7 +92,8 @@ async fn launch_java(
     data_root: PathBuf,
     account: GameAccount,
 ) -> Result<LaunchOutcome, String> {
-    let mut options = JavaLaunchOptions::new(data_root, instance.game_version.clone());
+    let version = java_version_selector(&instance.game_version);
+    let mut options = JavaLaunchOptions::new(data_root, version);
     options.instance = Some(instance.id.0.clone());
     options.loader.path = format!("instances/{}/loader", instance.id.0);
     options.download_concurrency = 10;
@@ -169,6 +170,25 @@ async fn launch_java(
     })
 }
 
+fn java_version_selector(input: &str) -> String {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "stable" | "latest" | "release" | "latest release" => "latest_release".to_owned(),
+        "snapshot" | "latest snapshot" => "latest_snapshot".to_owned(),
+        _ => input.trim().to_owned(),
+    }
+}
+
+fn validate_horizon_version(requested: &str, pinned: &str) -> Result<(), String> {
+    match requested.trim().to_ascii_lowercase().as_str() {
+        "stable" | "latest" | "horizon" => Ok(()),
+        _ if requested.trim() == pinned => Ok(()),
+        _ => Err(format!(
+            "Эта версия Horizon привязана к Minecraft {pinned}, а в сборке указана версия {}. Укажи {pinned} или «latest».",
+            requested.trim()
+        )),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct GithubRelease {
     /// GitHub's Releases API names the human-readable release title `name`.
@@ -241,6 +261,7 @@ async fn launch_horizon(
 
     let build = ensure_horizon_build(&client, &data_root).await?;
     let pins = build.pins()?;
+    validate_horizon_version(&instance.game_version, &pins.version)?;
 
     let prepare_api = query_launch_api(&build.preparer(), &build.directory).await?;
     let advertised_version = prepare_api["minecraft"]
@@ -892,6 +913,22 @@ async fn launch_horizon_client(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maps_java_release_aliases_to_crust_core_selectors() {
+        assert_eq!(java_version_selector("stable"), "latest_release");
+        assert_eq!(java_version_selector("latest"), "latest_release");
+        assert_eq!(java_version_selector("snapshot"), "latest_snapshot");
+        assert_eq!(java_version_selector("1.21.1"), "1.21.1");
+    }
+
+    #[test]
+    fn horizon_profiles_must_match_the_release_minecraft_pin() {
+        assert!(validate_horizon_version("stable", "26.3").is_ok());
+        assert!(validate_horizon_version("latest", "26.3").is_ok());
+        assert!(validate_horizon_version("26.3", "26.3").is_ok());
+        assert!(validate_horizon_version("1.21.1", "26.3").is_err());
+    }
 
     #[test]
     fn parses_the_github_release_name_as_the_nightly_title() {
