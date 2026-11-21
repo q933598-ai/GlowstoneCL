@@ -126,6 +126,7 @@ pub struct LaunchOutcome {
     pub instance_id: String,
     pub platform: GamePlatform,
     pub exit_code: Option<i32>,
+    pub notice: Option<String>,
 }
 
 /// Fetch the selectable game versions for the requested runtime. Lists are cached so
@@ -656,21 +657,43 @@ async fn launch_java(
     account: GameAccount,
     offline_skin: Option<(PathBuf, SkinModel)>,
 ) -> Result<LaunchOutcome, String> {
-    let version = if offline_skin.is_some() {
-        let resolved = resolve_java_skin_version(&instance.game_version).await?;
-        if !matches!(instance.loader, LoaderKind::Vanilla | LoaderKind::Fabric) {
-            return Err(format!(
-                "Автоприменение offline-скина в Minecraft {resolved} сейчас поддерживает Fabric. Эта сборка использует {:?}; создай для неё профиль Fabric или выбери Vanilla, чтобы GlowstoneCL установил Fabric автоматически.",
+    let mut version = java_version_selector(&instance.game_version);
+    let mut install_fabric_for_skin = false;
+    let mut skin_notice = None;
+
+    if let Some((skin_path, model)) = offline_skin.as_ref() {
+        if matches!(instance.loader, LoaderKind::Vanilla | LoaderKind::Fabric) {
+            match resolve_java_skin_version(&instance.game_version).await {
+                Ok(resolved) => {
+                    let game_dir = store::instance_directory(&instance.id.0)?;
+                    match install_offline_skins_mod(&game_dir, &resolved, &account.name, skin_path, *model).await {
+                        Ok(()) => {
+                            version = resolved;
+                            install_fabric_for_skin = instance.loader == LoaderKind::Vanilla;
+                        }
+                        Err(error) => {
+                            skin_notice = Some(format!(
+                                "Offline-скин не применён к Minecraft {resolved}: {error} Игра запущена без локального скина."
+                            ));
+                            eprintln!("[GlowstoneCL] {}", skin_notice.as_deref().unwrap_or_default());
+                        }
+                    }
+                }
+                Err(error) => {
+                    skin_notice = Some(format!(
+                        "Не удалось определить совместимую версию для OfflineSkins: {error} Игра запущена без локального скина."
+                    ));
+                    eprintln!("[GlowstoneCL] {}", skin_notice.as_deref().unwrap_or_default());
+                }
+            }
+        } else {
+            skin_notice = Some(format!(
+                "Локальные скины Java сейчас подключаются через Fabric. Выбран загрузчик {:?}; игра запущена с ним без автоматического применения скина.",
                 instance.loader
             ));
+            eprintln!("[GlowstoneCL] {}", skin_notice.as_deref().unwrap_or_default());
         }
-        let game_dir = store::instance_directory(&instance.id.0)?;
-        let (skin_path, model) = offline_skin.as_ref().expect("checked above");
-        install_offline_skins_mod(&game_dir, &resolved, &account.name, skin_path, *model).await?;
-        resolved
-    } else {
-        java_version_selector(&instance.game_version)
-    };
+    }
     let mut options = JavaLaunchOptions::new(data_root, version);
     options.instance = Some(instance.id.0.clone());
     options.loader.path = format!("instances/{}/loader", instance.id.0);
@@ -679,7 +702,7 @@ async fn launch_java(
 
     match instance.loader {
         LoaderKind::Vanilla => {
-            if offline_skin.is_some() {
+            if install_fabric_for_skin {
                 options.loader.kind = Some(JavaLoaderKind::Fabric);
                 options.loader.enable = true;
             }
@@ -750,6 +773,7 @@ async fn launch_java(
         instance_id: instance.id.0,
         platform: GamePlatform::Java,
         exit_code: status.code(),
+        notice: skin_notice,
     })
 }
 
@@ -970,6 +994,7 @@ async fn launch_horizon(
             instance_id: instance.id.0,
             platform,
             exit_code,
+            notice: None,
         })
 }
 
