@@ -46,6 +46,13 @@ pub enum Page {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModSource {
+    Horizon,
+    Modrinth,
+    CurseForge,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlatformChoice {
     Java,
     Horizon,
@@ -75,6 +82,14 @@ pub enum Message {
     ReloadVersionCatalog,
     VersionCatalogLoaded(GamePlatform, Result<Vec<game::VersionChoice>, String>),
     SearchMods,
+    SelectModSource(ModSource),
+    SearchCurseForge,
+    CurseForgeModsSearched(String, Result<Vec<curseforge::CurseForgeProject>, String>),
+    InstallCurseForgeMod(u32, u32),
+    CurseForgeModInstallFinished(String, Result<Vec<curseforge::InstalledCurseForgeMod>, String>),
+    RemoveCurseForgeMod(String, u32, u32),
+    CurseForgeApiKeyChanged(String),
+    SaveCurseForgeApiKey,
     ModTargetSelected(String),
     OpenInstanceMods(String),
     ModsSearched(String, Result<Vec<mods::ModProject>, String>),
@@ -153,6 +168,11 @@ pub struct App {
     installed_mods: Vec<mods::InstalledMod>,
     horizon_mod_results: Vec<horizon_mods::HorizonModProject>,
     horizon_installed_mods: Vec<horizon_mods::InstalledHorizonMod>,
+    curseforge_mod_results: Vec<curseforge::CurseForgeProject>,
+    curseforge_installed_mods: Vec<curseforge::InstalledCurseForgeMod>,
+    mod_source: ModSource,
+    curseforge_api_key_input: String,
+    curseforge_api_key_configured: bool,
     mods_busy: bool,
     mods_busy_project: Option<String>,
     mods_error: Option<String>,
@@ -218,6 +238,11 @@ impl Default for App {
             installed_mods: Vec::new(),
             horizon_mod_results: Vec::new(),
             horizon_installed_mods: Vec::new(),
+            curseforge_mod_results: Vec::new(),
+            curseforge_installed_mods: Vec::new(),
+            mod_source: ModSource::Modrinth,
+            curseforge_api_key_input: String::new(),
+            curseforge_api_key_configured: store::load_curseforge_api_key().is_ok(),
             mods_busy: false,
             mods_busy_project: None,
             mods_error: None,
@@ -264,6 +289,9 @@ fn start_catalog_search(app: &mut App, instance: GameInstance) -> iced::Task<Mes
 
     match instance.platform {
         GamePlatform::Java => {
+            app.mod_source = ModSource::Modrinth;
+            app.curseforge_installed_mods = curseforge::installed(&target_id).unwrap_or_default();
+            app.curseforge_mod_results.clear();
             app.horizon_installed_mods.clear();
             app.installed_mods = mods::installed(&target_id).unwrap_or_default();
             iced::Task::perform(
@@ -272,6 +300,9 @@ fn start_catalog_search(app: &mut App, instance: GameInstance) -> iced::Task<Mes
             )
         }
         GamePlatform::Horizon | GamePlatform::HorizonOffline => {
+            app.mod_source = ModSource::Horizon;
+            app.curseforge_installed_mods.clear();
+            app.curseforge_mod_results.clear();
             app.installed_mods.clear();
             app.horizon_installed_mods = horizon_mods::installed(&target_id).unwrap_or_default();
             iced::Task::perform(
@@ -280,6 +311,39 @@ fn start_catalog_search(app: &mut App, instance: GameInstance) -> iced::Task<Mes
             )
         }
     }
+}
+
+fn start_curseforge_search(app: &mut App) -> iced::Task<Message> {
+    let Some(target_id) = app.mod_target_instance.clone() else {
+        app.mods_error = Some("Сначала выбери Java-сборку с загрузчиком.".to_owned());
+        return iced::Task::none();
+    };
+    let Some(instance) = app.data.instances.iter()
+        .find(|item| item.id.0 == target_id && item.platform == GamePlatform::Java
+            && !matches!(item.loader, LoaderKind::Vanilla))
+        .cloned()
+    else {
+        app.mods_error = Some("CurseForge-моды можно устанавливать только в Java-сборки с загрузчиком.".to_owned());
+        return iced::Task::none();
+    };
+    let api_key = match store::load_curseforge_api_key() {
+        Ok(key) => key,
+        Err(error) => {
+            app.curseforge_mod_results.clear();
+            app.mods_busy = false;
+            app.mods_error = Some(error);
+            return iced::Task::none();
+        }
+    };
+    app.mods_busy = true;
+    app.mods_busy_project = None;
+    app.mods_error = None;
+    app.curseforge_mod_results.clear();
+    app.curseforge_installed_mods = curseforge::installed(&target_id).unwrap_or_default();
+    iced::Task::perform(
+        curseforge::search(instance, app.search.clone(), api_key),
+        move |result| Message::CurseForgeModsSearched(target_id, result),
+    )
 }
 
 pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
@@ -377,6 +441,9 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             }
         }
         Message::SearchMods => {
+            if app.mod_source == ModSource::CurseForge {
+                return start_curseforge_search(app);
+            }
             let Some(target_id) = app.mod_target_instance.clone() else {
                 app.mods_error = Some("Сначала выбери сборку с поддержкой модов.".to_owned());
                 return iced::Task::none();
@@ -390,6 +457,119 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             };
             app.mods_error = None;
             return start_catalog_search(app, instance);
+        }
+        Message::SelectModSource(source) => {
+            app.mod_source = source;
+            let compatible = match source {
+                ModSource::Horizon => |instance: &&GameInstance| matches!(instance.platform, GamePlatform::Horizon | GamePlatform::HorizonOffline),
+                ModSource::Modrinth | ModSource::CurseForge => |instance: &&GameInstance| instance.platform == GamePlatform::Java && !matches!(instance.loader, LoaderKind::Vanilla),
+            };
+            let selected = app.mod_target_instance.as_deref()
+                .and_then(|id| app.data.instances.iter().find(|item| item.id.0 == id))
+                .filter(|item| match source {
+                    ModSource::Horizon => matches!(item.platform, GamePlatform::Horizon | GamePlatform::HorizonOffline),
+                    ModSource::Modrinth | ModSource::CurseForge => item.platform == GamePlatform::Java && !matches!(item.loader, LoaderKind::Vanilla),
+                })
+                .cloned()
+                .or_else(|| app.data.instances.iter().find(|item| match source {
+                    ModSource::Horizon => matches!(item.platform, GamePlatform::Horizon | GamePlatform::HorizonOffline),
+                    ModSource::Modrinth | ModSource::CurseForge => item.platform == GamePlatform::Java && !matches!(item.loader, LoaderKind::Vanilla),
+                }).cloned());
+            let Some(instance) = selected else {
+                app.mod_target_instance = None;
+                app.mods_error = Some(match source {
+                    ModSource::Horizon => "Создай Horizon-сборку, чтобы просматривать HMOD.".to_owned(),
+                    ModSource::Modrinth | ModSource::CurseForge => "Создай Java-сборку с Fabric, Forge, NeoForge или Quilt.".to_owned(),
+                });
+                return iced::Task::none();
+            };
+            app.mod_target_instance = Some(instance.id.0.clone());
+            if source == ModSource::CurseForge {
+                app.curseforge_installed_mods = curseforge::installed(&instance.id.0).unwrap_or_default();
+                return start_curseforge_search(app);
+            }
+            return start_catalog_search(app, instance);
+        }
+        Message::SearchCurseForge => {
+            app.mod_source = ModSource::CurseForge;
+            return start_curseforge_search(app);
+        }
+        Message::CurseForgeModsSearched(target_id, result) => {
+            if app.mod_target_instance.as_deref() == Some(target_id.as_str()) {
+                app.mods_busy = false;
+                match result {
+                    Ok(results) => {
+                        app.curseforge_mod_results = results;
+                        app.mods_error = None;
+                    }
+                    Err(error) => {
+                        app.curseforge_mod_results.clear();
+                        app.mods_error = Some(error);
+                    }
+                }
+            }
+        }
+        Message::InstallCurseForgeMod(mod_id, file_id) => {
+            if app.mods_busy {
+                app.notice = Some("Дождись завершения текущей операции с модами.".to_owned());
+                return iced::Task::none();
+            }
+            let Some(target_id) = app.mod_target_instance.clone() else {
+                app.notice = Some("Сначала выбери Java-сборку.".to_owned());
+                return iced::Task::none();
+            };
+            let Some(instance) = app.data.instances.iter().find(|instance| instance.id.0 == target_id).cloned() else {
+                app.notice = Some("Выбранная сборка не найдена.".to_owned());
+                return iced::Task::none();
+            };
+            let api_key = match store::load_curseforge_api_key() {
+                Ok(key) => key,
+                Err(error) => {
+                    app.mods_error = Some(error);
+                    return iced::Task::none();
+                }
+            };
+            app.mods_busy = true;
+            app.mods_busy_project = Some(format!("{mod_id}:{file_id}"));
+            return iced::Task::perform(
+                curseforge::install(instance, mod_id, file_id, api_key),
+                move |result| Message::CurseForgeModInstallFinished(target_id, result),
+            );
+        }
+        Message::CurseForgeModInstallFinished(target_id, result) => {
+            if app.mod_target_instance.as_deref() == Some(target_id.as_str()) {
+                app.mods_busy = false;
+                app.mods_busy_project = None;
+                match result {
+                    Ok(installed) => {
+                        app.curseforge_installed_mods = installed;
+                        app.notice = Some("CurseForge-мод установлен и проверен по SHA-1.".to_owned());
+                    }
+                    Err(error) => app.notice = Some(error),
+                }
+            }
+        }
+        Message::RemoveCurseForgeMod(target_id, mod_id, file_id) => {
+            if app.mod_target_instance.as_deref() == Some(target_id.as_str()) {
+                match curseforge::remove(&target_id, mod_id, file_id) {
+                    Ok(installed) => {
+                        app.curseforge_installed_mods = installed;
+                        app.notice = Some("CurseForge-мод удалён.".to_owned());
+                    }
+                    Err(error) => app.notice = Some(error),
+                }
+            }
+        }
+        Message::CurseForgeApiKeyChanged(value) => app.curseforge_api_key_input = value,
+        Message::SaveCurseForgeApiKey => {
+            match store::store_curseforge_api_key(&app.curseforge_api_key_input) {
+                Ok(()) => {
+                    app.curseforge_api_key_input.clear();
+                    app.curseforge_api_key_configured = true;
+                    app.notice = Some("CurseForge API key сохранён в системном хранилище.".to_owned());
+                }
+                Err(error) => app.notice = Some(error),
+            }
         }
         Message::ModTargetSelected(target_id) => {
             let Some(instance) = app.data.instances.iter()
