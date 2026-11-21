@@ -94,6 +94,9 @@ pub enum Message {
     RenameSelectedSkin,
     SetSkinModel(String, store::SkinModel),
     DeleteSkin(String),
+    ApplySkin(String),
+    SkinApplied(String, Result<(), String>),
+    RotateSkinPreview(f32),
     MicrosoftClientIdChanged(String),
     SaveMicrosoftClientId,
     StartMicrosoftLogin,
@@ -133,6 +136,8 @@ pub struct App {
     skin_name: String,
     rename_skin_name: String,
     skin_model: store::SkinModel,
+    wardrobe_preview: Option<std::sync::Arc<Vec<[u8; 4]>>>,
+    wardrobe_angle: f32,
 }
 
 impl Default for App {
@@ -177,6 +182,8 @@ impl Default for App {
             skin_name: String::new(),
             rename_skin_name: String::new(),
             skin_model: store::SkinModel::Classic,
+            wardrobe_preview: None,
+            wardrobe_angle: 0.0,
             data,
         }
     }
@@ -418,16 +425,14 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 .or_else(|| Some("Аккаунт удалён из GlowstoneCL.".into()));
         }
         Message::SelectWardrobeAccount(account_id) => {
-            if app.data.accounts.iter().any(|account| {
-                account.id == account_id && account.kind == AccountKind::Offline
-            }) {
+            if app.data.accounts.iter().any(|account| account.id == account_id) {
                 app.wardrobe_account_id = Some(account_id);
                 app.wardrobe_selected_skin_id = None;
                 app.skin_name.clear();
                 refresh_wardrobe(app);
                 app.notice = None;
             } else {
-                app.notice = Some("Гардероб доступен только для offline-аккаунтов.".into());
+                app.notice = Some("Игровой аккаунт не найден.".into());
             }
         }
         Message::SkinNameChanged(value) => app.skin_name = value,
@@ -438,10 +443,8 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 app.notice = Some("Сначала выбери offline-аккаунт.".into());
                 return iced::Task::none();
             };
-            let Some(account) = app.data.accounts.iter().find(|account| {
-                account.id == account_id && account.kind == AccountKind::Offline
-            }) else {
-                app.notice = Some("Выбранный offline-аккаунт не найден.".into());
+            let Some(account) = app.data.accounts.iter().find(|account| account.id == account_id) else {
+                app.notice = Some("Выбранный игровой аккаунт не найден.".into());
                 return iced::Task::none();
             };
             let account_uuid = account.uuid.clone();
@@ -493,6 +496,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                                 app.wardrobe_skins = collection.skins;
                                 app.wardrobe_active_skin_id = active_skin_id;
                                 app.wardrobe_selected_skin_id = last_skin_id;
+                                refresh_skin_preview(app);
                                 app.rename_skin_name = app.wardrobe_selected_skin_id.as_ref()
                                     .and_then(|id| app.wardrobe_skins.iter().find(|skin| &skin.id == id))
                                     .map(|skin| skin.name.clone())
@@ -512,6 +516,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             if let Some(skin) = app.wardrobe_skins.iter().find(|skin| skin.id == id) {
                 app.wardrobe_selected_skin_id = Some(id);
                 app.rename_skin_name = skin.name.clone();
+                refresh_skin_preview(app);
             }
         }
         Message::ActivateSkin(id) => {
@@ -569,11 +574,59 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                             app.wardrobe_selected_skin_id = next_selected;
                             app.rename_skin_name.clear();
                         }
+                        refresh_skin_preview(app);
                         app.notice = Some("Скин удалён из локального гардероба.".into());
                     }
                     Err(error) => app.notice = Some(error),
                 }
             }
+        }
+        Message::ApplySkin(id) => {
+            let Some(account) = wardrobe_account(app).cloned() else {
+                app.notice = Some("Сначала выбери игровой аккаунт.".into());
+                return iced::Task::none();
+            };
+            if account.kind != AccountKind::Microsoft {
+                app.notice = Some("Для offline-профиля можно хранить и просматривать скин, но Vanilla-клиент не применяет его без клиентского мода.".into());
+                return iced::Task::none();
+            }
+            let Some(skin) = app.wardrobe_skins.iter().find(|skin| skin.id == id).cloned() else {
+                app.notice = Some("Скин не найден.".into());
+                return iced::Task::none();
+            };
+            let path = match store::skin_image_path(&account.uuid, &id) {
+                Ok(path) => path,
+                Err(error) => {
+                    app.notice = Some(error);
+                    return iced::Task::none();
+                }
+            };
+            app.notice = Some(format!("Загружаю «{}» в профиль Minecraft…", skin.name));
+            return iced::Task::perform(
+                game::apply_microsoft_skin(account, app.client_id.clone(), path, skin.model),
+                move |result| Message::SkinApplied(id.clone(), result),
+            );
+        }
+        Message::SkinApplied(id, result) => {
+            match result {
+                Ok(()) => {
+                    if let Some(account) = wardrobe_account(app).cloned() {
+                        match store::set_active_skin(&account.uuid, &id) {
+                            Ok(collection) => {
+                                app.wardrobe_skins = collection.skins;
+                                app.wardrobe_active_skin_id = collection.active_skin_id;
+                                app.wardrobe_selected_skin_id = Some(id);
+                                app.notice = Some("Скин загружен в официальный Minecraft-профиль. При следующем обновлении профиля он будет виден в игре и на других устройствах.".into());
+                            }
+                            Err(error) => app.notice = Some(format!("Скин отправлен в Minecraft, но не удалось обновить локальный выбор: {error}")),
+                        }
+                    }
+                }
+                Err(error) => app.notice = Some(error),
+            }
+        }
+        Message::RotateSkinPreview(delta) => {
+            app.wardrobe_angle = (app.wardrobe_angle + delta).rem_euclid(std::f32::consts::TAU);
         }
         Message::MicrosoftClientIdChanged(value) => app.client_id = value,
         Message::SaveMicrosoftClientId => {
@@ -1825,22 +1878,25 @@ fn instance_card(instance: &GameInstance, selected: bool) -> Element<'static, Me
 
 fn wardrobe_account(app: &App) -> Option<&AccountProfile> {
     app.wardrobe_account_id.as_ref()
-        .and_then(|id| app.data.accounts.iter().find(|account| {
-            &account.id == id && account.kind == AccountKind::Offline
-        }))
+        .and_then(|id| app.data.accounts.iter().find(|account| &account.id == id))
 }
 
 fn ensure_wardrobe_account(app: &mut App) {
-    let current_is_offline = app.wardrobe_account_id.as_ref().is_some_and(|id| {
-        app.data.accounts.iter().any(|account| {
-            &account.id == id && account.kind == AccountKind::Offline
-        })
+    let current_exists = app.wardrobe_account_id.as_ref().is_some_and(|id| {
+        app.data.accounts.iter().any(|account| &account.id == id)
     });
-    if !current_is_offline {
-        app.wardrobe_account_id = app.data.accounts.iter()
-            .find(|account| account.kind == AccountKind::Offline)
-            .map(|account| account.id.clone());
+    if !current_exists {
+        app.wardrobe_account_id = app.data.settings.selected_account_id.clone()
+            .filter(|id| app.data.accounts.iter().any(|account| &account.id == id))
+            .or_else(|| app.data.accounts.first().map(|account| account.id.clone()));
     }
+}
+
+fn refresh_skin_preview(app: &mut App) {
+    app.wardrobe_preview = wardrobe_account(app)
+        .and_then(|account| app.wardrobe_selected_skin_id.as_deref()
+            .map(|id| (account.uuid.clone(), id.to_owned())))
+        .and_then(|(uuid, id)| store::load_skin_pixels(&uuid, &id).ok());
 }
 
 fn refresh_wardrobe(app: &mut App) {
@@ -1865,25 +1921,27 @@ fn refresh_wardrobe(app: &mut App) {
                 .and_then(|id| app.wardrobe_skins.iter().find(|skin| &skin.id == id))
                 .map(|skin| skin.name.clone())
                 .unwrap_or_default();
+            refresh_skin_preview(app);
         }
-        Err(error) => app.notice = Some(error),
+        Err(error) => {
+            app.wardrobe_preview = None;
+            app.notice = Some(error);
+        }
     }
 }
 
 fn wardrobe_page(app: &App) -> Element<'_, Message> {
     let mut account_picker = row![].spacing(8).width(Length::Fill);
-    let offline_accounts: Vec<_> = app.data.accounts.iter()
-        .filter(|account| account.kind == AccountKind::Offline)
-        .collect();
+    let accounts: Vec<_> = app.data.accounts.iter().collect();
 
-    if offline_accounts.is_empty() {
+    if accounts.is_empty() {
         return column![
-            section_header("ГАРДЕРОБ", "Локальные скины для offline-аккаунтов."),
+            section_header("ГАРДЕРОБ", "Скины для offline- и Microsoft-аккаунтов."),
             container(
                 column![
                     icon("user", PURPLE, 28.0),
-                    text("Нет offline-аккаунтов").size(14).color(TEXT),
-                    text("Сначала создай локальный профиль в разделе «Аккаунты». Скины Microsoft-аккаунтов этот гардероб не изменяет.")
+                    text("Нет игровых аккаунтов").size(14).color(TEXT),
+                    text("Добавь offline-профиль или войди через Microsoft в разделе «Аккаунты».")
                         .size(10)
                         .color(MUTED),
                     primary_button("Перейти к аккаунтам", Message::Navigate(Page::Accounts)),
@@ -1899,10 +1957,11 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
         .into();
     }
 
-    for account in &offline_accounts {
+    for account in &accounts {
         let active = app.wardrobe_account_id.as_deref() == Some(account.id.as_str());
+        let label = format!("{} · {}", account.name, account.kind.label());
         account_picker = account_picker.push(
-            button(text(account.name.clone()).size(10).color(if active { CYAN } else { TEXT }))
+            button(text(label).size(10).color(if active { CYAN } else { TEXT }))
                 .on_press(Message::SelectWardrobeAccount(account.id.clone()))
                 .padding([9, 13])
                 .style(move |theme, status| {
@@ -1918,8 +1977,8 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
 
     let Some(account) = wardrobe_account(app) else {
         return column![
-            section_header("ГАРДЕРОБ", "Локальные скины для offline-аккаунтов."),
-            text("Выбери offline-аккаунт.").size(11).color(MUTED),
+            section_header("ГАРДЕРОБ", "Скины для offline- и Microsoft-аккаунтов."),
+            text("Выбери игровой аккаунт.").size(11).color(MUTED),
             account_picker,
         ]
         .spacing(12)
@@ -1931,13 +1990,17 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
         column![
             row![
                 icon("image", PURPLE, 18.0),
-                text("Добавить скин").size(14).color(TEXT),
+                text("Импортировать скин").size(14).color(TEXT),
                 Space::new().width(Length::Fill),
                 status_chip("PNG · ДО 2 МБ", PANEL_LIGHT, MUTED),
             ]
             .align_y(Alignment::Center)
             .spacing(8),
-            text("Поддерживаются стандартные PNG-текстуры Minecraft 64×64 и старые 64×32.")
+            text(if account.kind == AccountKind::Microsoft {
+                "Для Microsoft-аккаунта импортированный скин можно отправить в официальный профиль Minecraft."
+            } else {
+                "Для offline-профиля скин хранится локально. Чтобы он отображался в игре, нужен клиентский мод."
+            })
                 .size(9)
                 .color(MUTED),
             text_input("Название (необязательно, возьмём имя файла)", &app.skin_name)
@@ -1960,6 +2023,44 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
     .padding(15)
     .width(Length::Fill)
     .style(|_| glass_style(PANEL, EDGE));
+
+    let selected_skin = app.wardrobe_selected_skin_id.as_deref()
+        .and_then(|id| app.wardrobe_skins.iter().find(|skin| skin.id == id));
+    let preview_panel: Element<'_, Message> = if let (Some(texture), Some(skin)) =
+        (app.wardrobe_preview.as_ref(), selected_skin) {
+        container(
+            column![
+                row![
+                    text("3D-ПРЕДПРОСМОТР").size(9).color(CYAN),
+                    Space::new().width(Length::Fill),
+                    text(skin.model.label()).size(9).color(MUTED),
+                ].align_y(Alignment::Center),
+                canvas::Canvas::new(crate::skin_preview::SkinPreview::new(
+                    texture.clone(), skin.model, app.wardrobe_angle,
+                ))
+                    .width(Length::Fill)
+                    .height(Length::Fixed(330.0)),
+                row![
+                    quiet_button("⟲ Влево", Message::RotateSkinPreview(-0.45)),
+                    quiet_button("Вправо ⟳", Message::RotateSkinPreview(0.45)),
+                    Space::new().width(Length::Fill),
+                    text("Поворот модели").size(8).color(SUBTLE),
+                ].align_y(Alignment::Center).spacing(8),
+            ].spacing(8),
+        )
+        .padding(12)
+        .width(Length::Fill)
+        .style(|_| glass_style(PANEL, EDGE))
+        .into()
+    } else {
+        container(
+            column![
+                text("3D-предпросмотр").size(11).color(TEXT),
+                text("Выбери импортированный скин, чтобы увидеть модель персонажа.")
+                    .size(9).color(MUTED),
+            ].spacing(6),
+        ).padding(14).width(Length::Fill).style(|_| glass_style(PANEL, EDGE)).into()
+    };
 
     let active_preview: Element<'_, Message> = if let Some(active_id) = app.wardrobe_active_skin_id.as_deref() {
         if let Ok(path) = store::skin_image_path(&account_uuid, active_id) {
@@ -2073,6 +2174,11 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
                                 } else {
                                     quiet_button("Сделать активным", Message::ActivateSkin(skin_id.clone()))
                                 },
+                                if account.kind == AccountKind::Microsoft {
+                                    quiet_button("Применить в Minecraft", Message::ApplySkin(skin_id.clone()))
+                                } else {
+                                    Space::new().width(0).into()
+                                },
                             ]
                             .spacing(6),
                             row![
@@ -2103,16 +2209,21 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
     }
 
     column![
-        section_header("ГАРДЕРОБ", format!("Локальные скины для offline-профиля {}.", account.name)),
+        section_header("ГАРДЕРОБ", format!("Персональные скины · {} · {}", account.name, account.kind.label())),
         account_picker,
         import_panel,
+        preview_panel,
         active_preview,
         text_input("Новое название для выбранного скина", &app.rename_skin_name)
             .on_input(Message::RenameNameChanged)
             .padding(9)
             .size(10),
         skin_list,
-        text("Скины хранятся локально отдельно для каждого offline UUID. Чистый Minecraft пока не получает эту текстуру автоматически — для отображения внутри игры потребуется совместимый клиентский механизм.")
+        text(if account.kind == AccountKind::Microsoft {
+            "Для Microsoft выбранный скин отправляется в профиль Minecraft Services. Для offline-профиля нужен отдельный клиентский мод: Vanilla не загружает локальные скины."
+        } else {
+            "Offline-сетевой профиль и обычный Vanilla-клиент не могут получить локальную текстуру без клиентского мода. Сейчас она доступна в 3D-предпросмотре и локальном списке."
+        })
             .size(8)
             .color(SUBTLE),
     ]
