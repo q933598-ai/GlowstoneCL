@@ -698,6 +698,34 @@ pub fn remove_refresh_token(account_id: &str) {
     }
 }
 
+const CURSEFORGE_KEYRING_ID: &str = "curseforge-api-key";
+
+pub fn store_curseforge_api_key(api_key: &str) -> Result<(), String> {
+    let key = api_key.trim();
+    if !(16..=512).contains(&key.len()) || key.chars().any(char::is_control) {
+        return Err("CurseForge API key должен содержать от 16 до 512 символов.".to_owned());
+    }
+    let entry = keyring::Entry::new("GlowstoneCL", CURSEFORGE_KEYRING_ID)
+        .map_err(|error| format!("Не удалось открыть системное хранилище: {error}"))?;
+    entry.set_password(key)
+        .map_err(|error| format!("Не удалось сохранить CurseForge API key: {error}"))
+}
+
+pub fn load_curseforge_api_key() -> Result<String, String> {
+    let entry = keyring::Entry::new("GlowstoneCL", CURSEFORGE_KEYRING_ID)
+        .map_err(|error| format!("Не удалось открыть системное хранилище: {error}"))?;
+    entry.get_password().map_err(|error| match error {
+        keyring::Error::NoEntry => "CurseForge API key ещё не добавлен.".to_owned(),
+        other => format!("Не удалось прочитать CurseForge API key: {other}"),
+    })
+}
+
+pub fn remove_curseforge_api_key() {
+    if let Ok(entry) = keyring::Entry::new("GlowstoneCL", CURSEFORGE_KEYRING_ID) {
+        let _ = entry.delete_credential();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
