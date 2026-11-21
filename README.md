@@ -19,7 +19,7 @@ The `test/glowstonecl` branch includes:
 - first-launch installation and launch of Vanilla, Fabric, Quilt, Forge and NeoForge profiles;
 - **Horizon installation and launch**: the latest supported official Nightly is downloaded, its version-bound Ed25519 signature and archive SHA-256 are checked, and the binary's Launch API is queried before use;
 - automatic download of the Mojang game files and Java version required by Horizon, followed by resource preparation and launch through `--session-stdin`;
-- Microsoft browser sign-in using Device Code Flow, with automatic browser opening and background polling, followed by Xbox Live, XSTS and Minecraft Services, including Java ownership / Game Pass product checks;
+- Microsoft browser sign-in through CrustCore using the official Minecraft Launcher public client by default (optional custom Client ID), followed by Xbox Live, XSTS and Minecraft Services, including ownership / Game Pass checks;
 - Microsoft refresh-token storage in the operating system credential store, with session refresh before launching a game;
 - offline profiles for Java offline-mode play.
 
@@ -71,7 +71,7 @@ Each instance has a separate game directory under `instances/<uuid>/`. Java and 
 
 ## Microsoft sign-in setup
 
-A Microsoft Application (client) ID for a public-client app is required. Minecraft Services may require the app to be approved before its APIs accept the Client ID. See [docs/ACCOUNTS.md](docs/ACCOUNTS.md) for registration and access-review steps. GlowstoneCL does not use or embed a Client Secret.
+A custom Microsoft Application (client) ID is optional. GlowstoneCL uses CrustCore's official Minecraft Launcher public client ID by default; custom Entra registrations may require Minecraft Services approval. See [docs/ACCOUNTS.md](docs/ACCOUNTS.md). GlowstoneCL does not use or embed a Client Secret.
 
 ## Workspace
 
