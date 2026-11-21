@@ -676,6 +676,9 @@ async fn launch_java(
     let mut child = launch
         .spawn(&plan)
         .map_err(|error| format!("Не удалось запустить Java: {error}"))?;
+    if let Err(error) = store::record_recent_play(&instance.id.0) {
+        eprintln!("[GlowstoneCL] Не удалось сохранить историю запусков: {error}");
+    }
     let status = child
         .wait()
         .await
@@ -901,7 +904,7 @@ async fn launch_horizon(
         fs::write(instance_dir.join("horizon-player.txt"), format!("name:{}\n", account.name))
             .map_err(|error| format!("Не удалось сохранить offline-ник Horizon: {error}"))?;
     }
-    launch_horizon_client(&build, &instance_dir, &account, offline_skin).await
+    launch_horizon_client(&build, &instance.id.0, &instance_dir, &account, offline_skin).await
         .map(|exit_code| LaunchOutcome {
             instance_id: instance.id.0,
             platform,
@@ -1629,6 +1632,7 @@ struct HorizonSession<'a> {
 
 async fn launch_horizon_client(
     build: &HorizonBuild,
+    instance_id: &str,
     game_dir: &Path,
     account: &GameAccount,
     offline_skin: Option<(PathBuf, SkinModel)>,
@@ -1709,6 +1713,9 @@ async fn launch_horizon_client(
             return Err(format!("Не удалось передать Microsoft-сессию Horizon: {error}"));
         }
         // Dropping stdin closes the stream. Horizon reads the JSON once and continues.
+    }
+    if let Err(error) = store::record_recent_play(instance_id) {
+        eprintln!("[GlowstoneCL] Не удалось сохранить историю запусков: {error}");
     }
     let status = child
         .wait()
