@@ -2,7 +2,7 @@
 
 ## Runtime separation
 
-GlowstoneCL uses one desktop application to manage two distinct game runtimes.
+GlowstoneCL uses one desktop application to manage Minecraft Java and two separate Horizon runtimes.
 They share account selection, instance metadata, storage roots and launcher UI,
 but they do not share a mod execution model.
 
@@ -22,7 +22,7 @@ offline-mode play; Microsoft accounts are refreshed before launch.
 
 ## Horizon
 
-The Horizon backend downloads the official runtime from the
+The official Horizon backend downloads the runtime from the
 [horizon-rust/horizon releases](https://github.com/horizon-rust/horizon/releases).
 Before use it verifies the release's version-bound Ed25519 signature and the
 archive SHA-256, then asks the installed binaries for their Launch API rather
@@ -44,6 +44,27 @@ backend. Horizon is a separate runtime: Java JAR mods are not directly
 compatible with it, and its content/native mod packages must follow the
 format and API of the selected Horizon build.
 
+## Horizon Offline
+
+Horizon Offline is a separate, unofficial fork from
+[gerdaroot/Horizon-Offline-Launcher](https://github.com/gerdaroot/Horizon-Offline-Launcher).
+GlowstoneCL downloads it from its own release feed, verifies it with the fork's
+own Ed25519 key and checksum, and stores it under a separate runtime directory.
+It is never substituted for the official Horizon binary.
+
+The fork currently pins **Minecraft 26.3 and Java 25**. It requires an existing
+local Minecraft installation: GlowstoneCL searches the standard `.minecraft`,
+Prism Launcher and MultiMC directories, or the directory supplied through
+`GLOWSTONE_MINECRAFT_DIR`. Prism/MultiMC data is imported through the fork's
+`--prism-dir` preparer option. The offline path does not download the
+Minecraft client jar for a local offline account; it prepares the fork from
+the player's installed game files.
+
+The local offline nickname is written to `horizon-player.txt` in the
+instance's game directory. No Microsoft token is sent to the offline fork.
+This fork is for local/offline play and does not provide official online-mode
+authentication or access to online services.
+
 ## Microsoft and offline accounts
 
 Microsoft sign-in uses Device Code Flow, Xbox Live, XSTS and Minecraft
@@ -52,15 +73,16 @@ Game Pass products) and retrieves the Minecraft profile before saving it.
 Refresh tokens are stored in the operating system credential store. Short-lived
 access tokens stay in memory and are refreshed before launch through CrustCore.
 
-Offline profiles use deterministic offline UUIDs and are available for Java
-offline-mode play only.
+Offline profiles use deterministic offline UUIDs. They can be used with Java
+offline-mode play and with the separate Horizon Offline fork; the official
+Horizon runtime still requires a Microsoft/Xbox-backed Minecraft session.
 
 ## Current implementation boundary
 
 The desktop crate currently contains the runtime integrations:
 
-- `auth.rs` — Microsoft Device Code Flow, Minecraft profile checks and CrustCore account construction;
-- `game.rs` — CrustCore Java installer/launcher and Horizon Launch API integration;
+- `auth.rs` — Microsoft browser Device Code Flow through CrustCore, profile checks and CrustCore account construction;
+- `game.rs` — CrustCore Java installer/launcher, signed official Horizon release selection, and separate Horizon Offline fork integration;
 - `store.rs` — instance metadata, per-instance workspaces and OS credential storage;
 - `ui.rs` — desktop controls that call the asynchronous authentication and launch operations.
 
