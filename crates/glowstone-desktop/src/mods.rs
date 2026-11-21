@@ -378,6 +378,12 @@ pub async fn install(instance: GameInstance, project_id: String) -> Result<Vec<I
     let http = client()?;
     let game_version = resolve_game_version(&http, &instance.game_version).await?;
     let mut manifest = read_manifest(&instance.id.0)?;
+    let mods_dir = store::instance_directory(&instance.id.0)?.join("mods");
+    // The manifest is only bookkeeping. If a user manually removes a managed JAR,
+    // drop its stale record so a later install click can download it again.
+    manifest.mods.retain(|item| {
+        safe_filename(&item.file_name).is_some_and(|name| mods_dir.join(name).is_file())
+    });
 
     let root_version = manifest.mods.iter()
         .find(|item| item.project_id == project_id)
