@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use directories::BaseDirs;
 use glowstone_core::{GameInstance, GamePlatform, InstanceId, InstanceState, LoaderKind};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -441,20 +442,97 @@ pub fn import_skin(
     Ok(collection)
 }
 
+/// Fingerprints the decoded appearance rather than PNG file bytes. Microsoft can
+/// return the same skin re-encoded with different PNG filters or colour types.
+fn skin_fingerprint(bytes: &[u8]) -> Result<[u8; 32], String> {
+    validate_skin_png(bytes)?;
+    let mut decoder = png::Decoder::new(Cursor::new(bytes));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder
+        .read_info()
+        .map_err(|error| format!("Не удалось прочитать PNG скина: {error}"))?;
+    let mut buffer = vec![0; reader.output_buffer_size()];
+    let output = reader
+        .next_frame(&mut buffer)
+        .map_err(|error| format!("Не удалось декодировать скин: {error}"))?;
+    let decoded = &buffer[..output.buffer_size()];
+    let mut rgba = Vec::with_capacity((output.width * output.height * 4) as usize);
+    match output.color_type {
+        png::ColorType::Rgba => {
+            for pixel in decoded.chunks_exact(4) {
+                if pixel[3] == 0 {
+                    rgba.extend_from_slice(&[0, 0, 0, 0]);
+                } else {
+                    rgba.extend_from_slice(pixel);
+                }
+            }
+        }
+        png::ColorType::Rgb => {
+            for pixel in decoded.chunks_exact(3) {
+                rgba.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+            }
+        }
+        png::ColorType::Grayscale => {
+            for value in decoded {
+                rgba.extend_from_slice(&[*value, *value, *value, 255]);
+            }
+        }
+        png::ColorType::GrayscaleAlpha => {
+            for pixel in decoded.chunks_exact(2) {
+                if pixel[1] == 0 {
+                    rgba.extend_from_slice(&[0, 0, 0, 0]);
+                } else {
+                    rgba.extend_from_slice(&[pixel[0], pixel[0], pixel[0], pixel[1]]);
+                }
+            }
+        }
+        png::ColorType::Indexed => {
+            return Err("Не удалось нормализовать палитровый PNG скина.".to_owned());
+        }
+    }
+
+    let mut digest = Sha256::new();
+    digest.update(output.width.to_le_bytes());
+    digest.update(output.height.to_le_bytes());
+    digest.update(rgba);
+    Ok(digest.finalize().into())
+}
+
 /// Imports a remotely managed skin once and makes that entry the active local preview.
+/// Matching decoded pixels also collapse duplicates created by older byte-only sync logic.
 pub fn import_skin_if_missing(
     account_uuid: &str,
     name: &str,
     bytes: &[u8],
     model: SkinModel,
 ) -> Result<SkinCollection, String> {
-    let collection = load_skin_collection(account_uuid)?;
+    let fingerprint = skin_fingerprint(bytes)?;
+    let mut collection = load_skin_collection(account_uuid)?;
+    let mut matching_ids = Vec::new();
+
     for skin in &collection.skins {
         let path = skin_file_path(account_uuid, &skin.id)?;
-        if fs::read(path).is_ok_and(|stored| stored == bytes) {
-            return set_active_skin(account_uuid, &skin.id);
+        if let Ok(stored) = fs::read(path) {
+            if skin_fingerprint(&stored).is_ok_and(|existing| existing == fingerprint) {
+                matching_ids.push(skin.id.clone());
+            }
         }
     }
+
+    if let Some(canonical_id) = matching_ids.first().cloned() {
+        for duplicate_id in matching_ids.iter().skip(1) {
+            let path = skin_file_path(account_uuid, duplicate_id)?;
+            if path.is_file() {
+                fs::remove_file(path)
+                    .map_err(|error| format!("Не удалось удалить дубликат скина: {error}"))?;
+            }
+            collection.skins.retain(|skin| &skin.id != duplicate_id);
+        }
+        collection.active_skin_id = Some(canonical_id);
+        save_skin_collection(account_uuid, &collection)?;
+        return Ok(collection);
+    }
+
     import_skin(account_uuid, name, bytes, model)
 }
 
