@@ -243,6 +243,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                         .find(|item| item.platform == GamePlatform::Java && !matches!(item.loader, LoaderKind::Vanilla))
                         .cloned());
                 app.mod_target_instance = selected.as_ref().map(|item| item.id.0.clone());
+                app.mods_busy_project = None;
                 app.mod_results.clear();
                 app.mods_error = None;
                 app.installed_mods = selected.as_ref()
@@ -287,6 +288,17 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             app.search = value;
             app.page = Page::Catalog;
             app.notice = None;
+            if app.mod_target_instance.is_none() {
+                let selected = app.data.settings.selected_instance_id.as_deref()
+                    .and_then(|id| app.data.instances.iter().find(|item| item.id.0 == id))
+                    .filter(|item| item.platform == GamePlatform::Java && !matches!(item.loader, LoaderKind::Vanilla))
+                    .or_else(|| app.data.instances.iter()
+                        .find(|item| item.platform == GamePlatform::Java && !matches!(item.loader, LoaderKind::Vanilla)));
+                app.mod_target_instance = selected.map(|item| item.id.0.clone());
+                app.installed_mods = app.mod_target_instance.as_deref()
+                    .and_then(|id| mods::installed(id).ok())
+                    .unwrap_or_default();
+            }
         }
         Message::SearchMods => {
             let Some(target_id) = app.mod_target_instance.clone() else {
@@ -315,6 +327,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 return iced::Task::none();
             };
             app.mod_target_instance = Some(target_id.clone());
+            app.mods_busy_project = None;
             app.installed_mods = mods::installed(&target_id).unwrap_or_default();
             app.mod_results.clear();
             app.mods_busy = true;
@@ -2776,9 +2789,12 @@ fn catalog_page(app: &App) -> Element<'_, Message> {
         let installed = app.installed_mods.iter().any(|item| item.project_id == project.project_id);
         let project_id = project.project_id.clone();
         let project_name = project.title.clone();
-        let button_label = if installed { "Установлен" } else { "Установить" };
+        let installing = app.mods_busy_project.as_deref() == Some(project.project_id.as_str());
+        let button_label = if installing { "Загрузка…" } else { "Установить" };
         let action = if installed {
             Message::Info("Этот мод уже установлен в выбранную сборку.")
+        } else if installing {
+            Message::Info("Этот мод уже загружается.")
         } else {
             Message::InstallMod(project_id)
         };
