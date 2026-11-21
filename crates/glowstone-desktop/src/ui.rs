@@ -80,6 +80,7 @@ pub enum Message {
     MicrosoftClientIdChanged(String),
     SaveMicrosoftClientId,
     StartMicrosoftLogin,
+    BrowserLoginFinished(Result<auth::BrowserLoginResult, String>),
     DeviceCodeReady(Result<DeviceCodePrompt, String>),
     OpenMicrosoftVerification,
     PollMicrosoftLogin,
@@ -377,16 +378,47 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 .or_else(|| Some("Microsoft Client ID сохранён.".into()));
         }
         Message::StartMicrosoftLogin => {
-            if app.client_id.trim().is_empty() {
-                app.notice = Some("Сначала добавь Microsoft Client ID и сохрани его.".into());
-                return iced::Task::none();
-            }
             app.auth_busy = true;
-            app.notice = Some("Запрашиваю код входа у Microsoft…".into());
+            let client_id = (!app.client_id.trim().is_empty())
+                .then(|| app.client_id.trim().to_owned());
+            if let Some(client_id) = &client_id {
+                // Persist a custom client id together with the account flow so later
+                // refreshes use the same Microsoft application after restarting the app.
+                app.data.settings.microsoft_client_id = client_id.clone();
+                if let Err(error) = store::save(&app.data) {
+                    app.auth_busy = false;
+                    app.notice = Some(format!("Не удалось сохранить Microsoft Client ID: {error}"));
+                    return iced::Task::none();
+                }
+            }
+            app.notice = Some("Открываю официальный вход Microsoft в браузере…".into());
             return iced::Task::perform(
-                auth::request_device_code(app.client_id.trim().to_owned()),
-                Message::DeviceCodeReady,
+                auth::browser_login(client_id),
+                Message::BrowserLoginFinished,
             );
+        }
+        Message::BrowserLoginFinished(result) => {
+            app.auth_busy = false;
+            match result {
+                Ok(login) => {
+                    let account_id = login.account.id.clone();
+                    app.data.accounts.retain(|current| current.id != account_id);
+                    app.data.accounts.push(login.account.clone());
+                    app.data.settings.selected_account_id = Some(account_id.clone());
+                    app.device_code = None;
+
+                    let token_status = match store::store_refresh_token(&account_id, &login.refresh_token) {
+                        Ok(()) => "Токен обновления сохранён в системном хранилище.",
+                        Err(_) => "Не удалось сохранить refresh token в системном хранилище. Для следующего запуска может потребоваться повторный вход.",
+                    };
+                    let save_status = store::save(&app.data);
+                    app.notice = Some(match save_status {
+                        Ok(()) => format!("Minecraft-профиль {} подключён. {token_status}", login.account.name),
+                        Err(error) => format!("Профиль {} подключён, но список аккаунтов не удалось сохранить: {error}", login.account.name),
+                    });
+                }
+                Err(error) => app.notice = Some(error),
+            }
         }
         Message::DeviceCodeReady(result) => {
             match result {
@@ -1618,12 +1650,12 @@ fn accounts_page(app: &App) -> Element<'_, Message> {
             ]
             .spacing(8)
             .align_y(Alignment::Center),
-            text("Нажми вход — GlowstoneCL откроет страницу Microsoft в браузере и автоматически дождётся подтверждения. Если браузер не открылся, код можно ввести вручную.")
+            text("Нажми вход — откроется браузер Microsoft с готовым запросом. По умолчанию используется официальный Client ID Minecraft Launcher; свой Client ID можно указать дополнительно.")
                 .size(9)
                 .color(MUTED),
-            text("Microsoft Client ID").size(9).color(MUTED),
+            text("Дополнительный Microsoft Client ID (необязательно)").size(9).color(MUTED),
             row![
-                text_input("Вставь Application (client) ID", &app.client_id)
+                text_input("Оставь пустым для официального входа", &app.client_id)
                     .on_input(Message::MicrosoftClientIdChanged)
                     .padding(10)
                     .size(10)
@@ -1646,7 +1678,7 @@ fn accounts_page(app: &App) -> Element<'_, Message> {
             .spacing(9)
             .align_y(Alignment::Center),
             microsoft_device_code(app),
-            text("Client ID не является секретом. Client Secret в настольном приложении не используется и не должен встраиваться в клиент.")
+            text("Свой Client ID — только для дополнительной конфигурации. Client Secret GlowstoneCL не использует и не запрашивает.")
                 .size(8)
                 .color(SUBTLE),
         ]
