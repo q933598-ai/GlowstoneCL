@@ -200,7 +200,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     app.notice = store::save(&app.data)
                         .err()
                         .map(|error| format!("Не удалось сохранить удаление: {error}"))
-                        .or_else(|| Some("Сборка и её рабочая папка удалены.".into()));
+                        .or_else(|| Some("Сборка удалена из библиотеки. Её файлы и миры сохранены в локальной корзине.".into()));
                 }
                 Err(error) => app.notice = Some(error),
             }
