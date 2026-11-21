@@ -17,6 +17,19 @@ launch pipeline:
 - installs supported loader profiles: Vanilla, Fabric, Quilt, Forge and NeoForge;
 - builds and starts the Java process with the selected account and instance directory.
 
+The Modrinth integration (`mods.rs`) is limited to Java instances with Fabric,
+Forge, NeoForge or Quilt. Search facets bind results to the selected Minecraft
+version and loader. Downloads are kept in that instance's `mods/` directory;
+GlowstoneCL stores a manifest of files it manages and leaves unrelated user JARs
+untouched. Required project/version dependencies are resolved before the root
+mod is installed. Every downloaded JAR must have a SHA-1 or SHA-512 hash from
+Modrinth and pass verification before it is renamed into place. The installer
+uses Modrinth's HTTPS CDN and enforces filename and file-size limits.
+
+Vanilla Java has no mod loader, so the catalogue rejects it. Modrinth Java JARs
+are not installed into Horizon or Horizon Offline: those runtimes use their own
+HMOD/HNMOD content formats.
+
 The selected instance gets its own game folder. Offline accounts work only in
 offline-mode play; Microsoft accounts are refreshed before launch.
 
@@ -83,6 +96,7 @@ The desktop crate currently contains the runtime integrations:
 
 - `auth.rs` — Microsoft browser Device Code Flow through CrustCore, profile checks and CrustCore account construction;
 - `game.rs` — CrustCore Java installer/launcher, signed official Horizon release selection, and separate Horizon Offline fork integration;
+- `mods.rs` — Modrinth search, compatibility selection, required-dependency resolution, hash-verified JAR installation and manifest-scoped removal;
 - `store.rs` — instance metadata, per-instance workspaces, OS credential storage, and per-account skin collections;
 - `skin_preview.rs` — textured 3D player preview built from the Minecraft skin atlas on Iced Canvas;
 - `ui.rs` — desktop controls for authentication, launching, and the multi-account skin wardrobe.
@@ -93,8 +107,9 @@ Skin files are stored under `skins/<profile-uuid>/` in the GlowstoneCL data dire
 
 The following integrations remain future work:
 
-- Modrinth and CurseForge catalogues;
-- in-app mod and modpack install/update/dependency resolution;
+- CurseForge catalogue and API integration;
+- full modpack import/export and one-click Modrinth `.mrpack` installation;
+- automatic updates for installed mods;
 - detailed download queue, progress and cancellation UI;
 - log and crash-report browser;
 - instance import/export and packaged GlowstoneCL installers.
