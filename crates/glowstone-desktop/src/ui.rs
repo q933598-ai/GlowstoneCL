@@ -4335,16 +4335,23 @@ fn status_chip(
 }
 
 fn primary_button(label: &'static str, message: Message) -> Element<'static, Message> {
-    button(text(label).size(10))
+    button(text(label).size(10).color(TEXT))
         .on_press(message)
         .padding([10, 15])
         .style(|theme, status| {
-            let mut style = button::primary(theme, status);
-            style.background = Some(CYAN.into());
-            style.text_color = Color::from_rgb8(8, 24, 34);
-            style.border = Border::default().rounded(11).width(1).color(CYAN);
+            let mut style = button::secondary(theme, status);
+            style.background = Some(
+                if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                    Color::from_rgba(0.91, 0.97, 0.98, 0.96)
+                } else {
+                    Color::from_rgba(1.0, 1.0, 1.0, 0.78)
+                }
+                .into(),
+            );
+            style.text_color = TEXT;
+            style.border = Border::default().rounded(13).width(1).color(EDGE_BRIGHT);
             style.shadow = Shadow {
-                color: Color::from_rgba(0.1, 0.7, 0.95, 0.2),
+                color: Color::from_rgba(0.10, 0.15, 0.19, 0.09),
                 offset: Vector::new(0.0, 3.0),
                 blur_radius: 12.0,
             };
@@ -4359,9 +4366,16 @@ fn tonal_button(label: &'static str, message: Message) -> Element<'static, Messa
         .padding([10, 14])
         .style(|theme, status| {
             let mut style = button::secondary(theme, status);
-            style.background = Some(Color::from_rgba(0.14, 0.20, 0.31, 0.82).into());
+            style.background = Some(
+                if matches!(status, button::Status::Hovered) {
+                    Color::from_rgba(0.95, 0.97, 0.98, 0.96)
+                } else {
+                    Color::from_rgba(0.95, 0.965, 0.975, 0.70)
+                }
+                .into(),
+            );
             style.text_color = TEXT;
-            style.border = Border::default().rounded(20).width(1).color(EDGE);
+            style.border = Border::default().rounded(16).width(1).color(EDGE);
             style
         })
         .into()
@@ -4499,9 +4513,9 @@ fn glass_style(background: Color, edge: Color) -> container::Style {
         background: Some(background.into()),
         border: Border::default().rounded(16).width(1).color(edge),
         shadow: Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.24),
-            offset: Vector::new(0.0, 7.0),
-            blur_radius: 20.0,
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.08),
+            offset: Vector::new(0.0, 4.0),
+            blur_radius: 16.0,
         },
         text_color: Some(TEXT),
         ..Default::default()
