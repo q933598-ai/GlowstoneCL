@@ -10,11 +10,17 @@ pub struct SkinPreview {
     texture: Arc<Vec<[u8; 4]>>,
     model: SkinModel,
     angle: f32,
+    walk_phase: f32,
 }
 
 impl SkinPreview {
     pub fn new(texture: Arc<Vec<[u8; 4]>>, model: SkinModel, angle: f32) -> Self {
-        Self { texture, model, angle }
+        Self { texture, model, angle, walk_phase: 0.0 }
+    }
+
+    pub fn with_walk_phase(mut self, phase: f32) -> Self {
+        self.walk_phase = phase;
+        self
     }
 }
 
@@ -171,30 +177,35 @@ impl<Message> canvas::Program<Message> for SkinPreview {
             body_uv, (8, 12), false,
         );
 
+        let gait = self.walk_phase.sin() * 1.5;
+        let left_arm_z = gait;
+        let right_arm_z = -gait;
+        let left_leg_z = -gait;
+        let right_leg_z = gait;
         let arm_width = if self.model == SkinModel::Slim { 3.0 } else { 4.0 };
         add_cube(
             &mut tiles, &self.texture, yaw, scale, center,
-            Vec3 { x: -4.0 - arm_width, y: 12.0, z: -2.0 },
-            Vec3 { x: -4.0, y: 24.0, z: 2.0 },
+            Vec3 { x: -4.0 - arm_width, y: 12.0, z: -2.0 + left_arm_z },
+            Vec3 { x: -4.0, y: 24.0, z: 2.0 + left_arm_z },
             left_arm_uv, (arm_width as u32, 12), false,
         );
         add_cube(
             &mut tiles, &self.texture, yaw, scale, center,
-            Vec3 { x: 4.0, y: 12.0, z: -2.0 },
-            Vec3 { x: 4.0 + arm_width, y: 24.0, z: 2.0 },
+            Vec3 { x: 4.0, y: 12.0, z: -2.0 + right_arm_z },
+            Vec3 { x: 4.0 + arm_width, y: 24.0, z: 2.0 + right_arm_z },
             right_arm_uv, (arm_width as u32, 12), false,
         );
 
         add_cube(
             &mut tiles, &self.texture, yaw, scale, center,
-            Vec3 { x: -4.0, y: 0.0, z: -2.0 },
-            Vec3 { x: 0.0, y: 12.0, z: 2.0 },
+            Vec3 { x: -4.0, y: 0.0, z: -2.0 + left_leg_z },
+            Vec3 { x: 0.0, y: 12.0, z: 2.0 + left_leg_z },
             left_leg_uv, (4, 12), false,
         );
         add_cube(
             &mut tiles, &self.texture, yaw, scale, center,
-            Vec3 { x: 0.0, y: 0.0, z: -2.0 },
-            Vec3 { x: 4.0, y: 12.0, z: 2.0 },
+            Vec3 { x: 0.0, y: 0.0, z: -2.0 + right_leg_z },
+            Vec3 { x: 4.0, y: 12.0, z: 2.0 + right_leg_z },
             right_leg_uv, (4, 12), false,
         );
 
