@@ -521,16 +521,6 @@ fn home_page(app: &App) -> Element<'_, Message> {
     ]
     .spacing(16)
     .width(Length::Fill);
-
-    if let Some(notice) = &app.notice {
-        content = content.push(
-            container(text(notice).size(10).color(TEXT_PRIMARY))
-                .padding(10)
-                .width(Length::Fill)
-                .style(|_| glass_style(CYAN_TINT, GLASS_EDGE_BRIGHT)),
-        );
-    }
-
     content.into()
 }
 
