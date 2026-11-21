@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Cursor;
 use std::path::PathBuf;
 
 use directories::BaseDirs;
@@ -28,6 +29,38 @@ pub struct AccountProfile {
     pub name: String,
     pub uuid: String,
     pub kind: AccountKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkinModel {
+    Classic,
+    Slim,
+}
+
+impl SkinModel {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Classic => "Steve · Classic",
+            Self::Slim => "Alex · Slim",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkinEntry {
+    pub id: String,
+    pub name: String,
+    pub model: SkinModel,
+    /// Legacy 64x32 skins are accepted for compatibility.
+    pub legacy: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SkinCollection {
+    pub skins: Vec<SkinEntry>,
+    pub active_skin_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -205,6 +238,193 @@ pub fn create_offline_account(name: &str) -> Result<AccountProfile, String> {
         uuid: player_uuid,
         kind: AccountKind::Offline,
     })
+}
+
+const MAX_SKIN_BYTES: usize = 2 * 1024 * 1024;
+
+fn skin_account_directory(account_uuid: &str) -> Result<PathBuf, String> {
+    let uuid = Uuid::parse_str(account_uuid)
+        .map_err(|_| "Некорректный UUID offline-аккаунта.".to_owned())?;
+    Ok(app_data_dir()?.join("skins").join(uuid.to_string()))
+}
+
+fn skin_collection_path(account_uuid: &str) -> Result<PathBuf, String> {
+    Ok(skin_account_directory(account_uuid)?.join("skins.json"))
+}
+
+fn save_skin_collection(account_uuid: &str, collection: &SkinCollection) -> Result<(), String> {
+    let directory = skin_account_directory(account_uuid)?;
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("Не удалось создать каталог скинов: {error}"))?;
+    let path = directory.join("skins.json");
+    let temporary = directory.join("skins.json.tmp");
+    let bytes = serde_json::to_vec_pretty(collection)
+        .map_err(|error| format!("Не удалось подготовить список скинов: {error}"))?;
+    fs::write(&temporary, bytes)
+        .map_err(|error| format!("Не удалось сохранить список скинов: {error}"))?;
+    if path.exists() {
+        fs::remove_file(&path)
+            .map_err(|error| format!("Не удалось заменить список скинов: {error}"))?;
+    }
+    fs::rename(&temporary, &path)
+        .map_err(|error| format!("Не удалось завершить сохранение скинов: {error}"))
+}
+
+pub fn load_skin_collection(account_uuid: &str) -> Result<SkinCollection, String> {
+    let path = skin_collection_path(account_uuid)?;
+    if !path.exists() {
+        return Ok(SkinCollection::default());
+    }
+    let bytes = fs::read(&path)
+        .map_err(|error| format!("Не удалось прочитать список скинов: {error}"))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| format!("Список скинов повреждён: {error}"))
+}
+
+fn validate_skin_png(bytes: &[u8]) -> Result<bool, String> {
+    if bytes.is_empty() || bytes.len() > MAX_SKIN_BYTES {
+        return Err("PNG должен быть размером не более 2 МБ.".to_owned());
+    }
+
+    let decoder = png::Decoder::new(Cursor::new(bytes));
+    let mut reader = decoder
+        .read_info()
+        .map_err(|error| format!("Не удалось прочитать PNG: {error}"))?;
+    let info = reader.info();
+    if info.width != 64 || !matches!(info.height, 64 | 32) {
+        return Err(format!(
+            "Неверный размер скина: {}×{}. Поддерживаются PNG 64×64 и 64×32.",
+            info.width, info.height
+        ));
+    }
+
+    let mut decoded = vec![0; reader.output_buffer_size()];
+    reader
+        .next_frame(&mut decoded)
+        .map_err(|error| format!("PNG повреждён или не может быть декодирован: {error}"))?;
+
+    Ok(info.height == 32)
+}
+
+fn skin_file_path(account_uuid: &str, skin_id: &str) -> Result<PathBuf, String> {
+    let account_directory = skin_account_directory(account_uuid)?;
+    let skin_id = Uuid::parse_str(skin_id)
+        .map_err(|_| "Некорректный идентификатор скина.".to_owned())?;
+    Ok(account_directory.join(format!("{skin_id}.png")))
+}
+
+fn clean_skin_name(input: &str) -> Result<String, String> {
+    let name = input.trim();
+    if name.is_empty() || name.chars().count() > 32 || name.chars().any(char::is_control) {
+        return Err("Название скина должно содержать от 1 до 32 обычных символов.".to_owned());
+    }
+    Ok(name.to_owned())
+}
+
+pub fn import_skin(
+    account_uuid: &str,
+    name: &str,
+    bytes: &[u8],
+    model: SkinModel,
+) -> Result<SkinCollection, String> {
+    let name = clean_skin_name(name)?;
+    let legacy = validate_skin_png(bytes)?;
+    let mut collection = load_skin_collection(account_uuid)?;
+    let id = Uuid::new_v4().to_string();
+    let directory = skin_account_directory(account_uuid)?;
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("Не удалось создать каталог скинов: {error}"))?;
+
+    let target = skin_file_path(account_uuid, &id)?;
+    let temporary = target.with_extension("png.tmp");
+    fs::write(&temporary, bytes)
+        .map_err(|error| format!("Не удалось сохранить PNG скина: {error}"))?;
+    fs::rename(&temporary, &target)
+        .map_err(|error| format!("Не удалось завершить импорт скина: {error}"))?;
+
+    collection.skins.push(SkinEntry {
+        id: id.clone(),
+        name,
+        model,
+        legacy,
+    });
+    if collection.active_skin_id.is_none() {
+        collection.active_skin_id = Some(id);
+    }
+    if let Err(error) = save_skin_collection(account_uuid, &collection) {
+        let _ = fs::remove_file(target);
+        return Err(error);
+    }
+    Ok(collection)
+}
+
+pub fn set_active_skin(account_uuid: &str, skin_id: &str) -> Result<SkinCollection, String> {
+    let mut collection = load_skin_collection(account_uuid)?;
+    if !collection.skins.iter().any(|skin| skin.id == skin_id) {
+        return Err("Скин не найден в этом offline-профиле.".to_owned());
+    }
+    let path = skin_file_path(account_uuid, skin_id)?;
+    if !path.is_file() {
+        return Err("Файл выбранного скина отсутствует. Импортируй его заново.".to_owned());
+    }
+    collection.active_skin_id = Some(skin_id.to_owned());
+    save_skin_collection(account_uuid, &collection)?;
+    Ok(collection)
+}
+
+pub fn rename_skin(
+    account_uuid: &str,
+    skin_id: &str,
+    new_name: &str,
+) -> Result<SkinCollection, String> {
+    let new_name = clean_skin_name(new_name)?;
+    let mut collection = load_skin_collection(account_uuid)?;
+    let skin = collection
+        .skins
+        .iter_mut()
+        .find(|skin| skin.id == skin_id)
+        .ok_or_else(|| "Скин не найден в этом offline-профиле.".to_owned())?;
+    skin.name = new_name;
+    save_skin_collection(account_uuid, &collection)?;
+    Ok(collection)
+}
+
+pub fn set_skin_model(
+    account_uuid: &str,
+    skin_id: &str,
+    model: SkinModel,
+) -> Result<SkinCollection, String> {
+    let mut collection = load_skin_collection(account_uuid)?;
+    let skin = collection
+        .skins
+        .iter_mut()
+        .find(|skin| skin.id == skin_id)
+        .ok_or_else(|| "Скин не найден в этом offline-профиле.".to_owned())?;
+    skin.model = model;
+    save_skin_collection(account_uuid, &collection)?;
+    Ok(collection)
+}
+
+pub fn delete_skin(account_uuid: &str, skin_id: &str) -> Result<SkinCollection, String> {
+    let mut collection = load_skin_collection(account_uuid)?;
+    let Some(index) = collection.skins.iter().position(|skin| skin.id == skin_id) else {
+        return Err("Скин уже удалён или не найден.".to_owned());
+    };
+    let path = skin_file_path(account_uuid, skin_id)?;
+    if path.exists() {
+        fs::remove_file(&path)
+            .map_err(|error| format!("Не удалось удалить PNG скина: {error}"))?;
+    }
+    collection.skins.remove(index);
+    if collection.active_skin_id.as_deref() == Some(skin_id) {
+        collection.active_skin_id = collection.skins.first().map(|skin| skin.id.clone());
+    }
+    save_skin_collection(account_uuid, &collection)?;
+    Ok(collection)
+}
+
+pub fn skin_image_path(account_uuid: &str, skin_id: &str) -> Result<PathBuf, String> {
+    skin_file_path(account_uuid, skin_id)
 }
 
 pub fn store_refresh_token(account_id: &str, refresh_token: &str) -> Result<(), String> {
