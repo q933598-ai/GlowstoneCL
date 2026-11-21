@@ -82,6 +82,11 @@ pub enum Message {
     ReloadVersionCatalog,
     VersionCatalogLoaded(GamePlatform, Result<Vec<game::VersionChoice>, String>),
     SearchMods,
+    ModpackSearchChanged(String),
+    SearchModpacks,
+    ModpacksSearched(Result<Vec<modpacks::ModpackProject>, String>),
+    InstallModpack(String, String),
+    ModpackInstallFinished(Result<GameInstance, String>),
     SelectModSource(ModSource),
     SearchCurseForge,
     CurseForgeModsSearched(String, Result<Vec<curseforge::CurseForgeProject>, String>),
@@ -176,6 +181,10 @@ pub struct App {
     mods_busy: bool,
     mods_busy_project: Option<String>,
     mods_error: Option<String>,
+    modpack_search: String,
+    modpack_results: Vec<modpacks::ModpackProject>,
+    modpacks_busy: bool,
+    modpack_installing: Option<String>,
     offline_name: String,
     client_id: String,
     device_code: Option<DeviceCodePrompt>,
@@ -246,6 +255,10 @@ impl Default for App {
             mods_busy: false,
             mods_busy_project: None,
             mods_error: None,
+            modpack_search: String::new(),
+            modpack_results: Vec::new(),
+            modpacks_busy: false,
+            modpack_installing: None,
             offline_name: String::new(),
             client_id: data.settings.microsoft_client_id.clone(),
             device_code: None,
@@ -350,6 +363,13 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
     match message {
         Message::Navigate(page) => {
             app.page = page;
+            if page == Page::Modpacks && app.modpack_results.is_empty() && !app.modpacks_busy {
+                app.modpacks_busy = true;
+                return iced::Task::perform(
+                    modpacks::search(app.modpack_search.clone()),
+                    Message::ModpacksSearched,
+                );
+            }
             if page == Page::News {
                 app.selected_news = None;
             }
@@ -438,6 +458,57 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                         }
                     }
                 }
+            }
+        }
+        Message::ModpackSearchChanged(value) => app.modpack_search = value,
+        Message::SearchModpacks => {
+            app.modpacks_busy = true;
+            return iced::Task::perform(
+                modpacks::search(app.modpack_search.clone()),
+                Message::ModpacksSearched,
+            );
+        }
+        Message::ModpacksSearched(result) => {
+            app.modpacks_busy = false;
+            match result {
+                Ok(results) => {
+                    app.modpack_results = results;
+                    app.mods_error = None;
+                }
+                Err(error) => app.notice = Some(error),
+            }
+        }
+        Message::InstallModpack(project_id, project_name) => {
+            if app.modpacks_busy {
+                app.notice = Some("Дождись завершения текущей операции с модпаками.".to_owned());
+                return iced::Task::none();
+            }
+            app.modpacks_busy = true;
+            app.modpack_installing = Some(project_id.clone());
+            app.notice = Some(format!("Устанавливаю модпак {project_name} в отдельную сборку…"));
+            return iced::Task::perform(
+                modpacks::install_project(project_id, project_name),
+                Message::ModpackInstallFinished,
+            );
+        }
+        Message::ModpackInstallFinished(result) => {
+            app.modpacks_busy = false;
+            app.modpack_installing = None;
+            match result {
+                Ok(instance) => {
+                    let id = instance.id.0.clone();
+                    app.data.instances.retain(|existing| existing.id.0 != id);
+                    app.data.instances.push(instance);
+                    app.data.settings.selected_instance_id = Some(id);
+                    app.platform = PlatformChoice::Java;
+                    app.loader = app.data.instances.last().map(|instance| instance.loader).unwrap_or(LoaderKind::Vanilla);
+                    app.page = Page::Instances;
+                    app.notice = store::save(&app.data)
+                        .err()
+                        .map(|error| format!("Модпак установлен, но не удалось сохранить профиль: {error}"))
+                        .or_else(|| Some("Модпак установлен в отдельную сборку. При первом запуске загрузятся ресурсы Minecraft и Java.".to_owned()));
+                }
+                Err(error) => app.notice = Some(error),
             }
         }
         Message::SearchMods => {
@@ -1773,7 +1844,7 @@ fn main_content(app: &App) -> Element<'_, Message> {
         Page::Wardrobe => wardrobe_page(app),
         Page::Settings => settings_page(app),
         Page::Catalog => catalog_page(app),
-        Page::Modpacks => modpacks_page(),
+        Page::Modpacks => modpacks_page(app),
         Page::Downloads => downloads_page(app),
         Page::News => news_page(app),
     }
@@ -4091,26 +4162,78 @@ fn source_card(
     .into()
 }
 
-fn modpacks_page() -> Element<'static, Message> {
-    column![
-        section_header("МОДПАКИ", "Импортируй готовые сборки или управляй собственными."),
+fn modpacks_page(app: &App) -> Element<'_, Message> {
+    let mut results = column![].spacing(10).width(Length::Fill);
+    for project in &app.modpack_results {
+        let project_id = project.project_id.clone();
+        let project_name = project.title.clone();
+        let installing = app.modpack_installing.as_deref() == Some(project.project_id.as_str());
+        results = results.push(
+            container(
+                row![
+                    mod_icon(None, project.title.clone()),
+                    column![
+                        text(project.title.clone()).size(12).color(TEXT),
+                        text(format!("от {} · {} загрузок", project.author, format_downloads(project.downloads)))
+                            .size(8).color(CYAN),
+                        text(project.description.clone()).size(9).color(MUTED),
+                        text(project.latest_version.as_deref().unwrap_or("Доступные версии Modrinth"))
+                            .size(8).color(SUBTLE),
+                    ].spacing(5).width(Length::Fill),
+                    primary_button(
+                        if installing { "Установка…" } else { "Установить" },
+                        Message::InstallModpack(project_id, project_name),
+                    ),
+                ].align_y(Alignment::Center).spacing(12)
+            )
+            .padding(14)
+            .width(Length::Fill)
+            .style(|_| glass_style(PANEL, EDGE))
+        );
+    }
+
+    let mut content = column![
+        section_header("МОДПАКИ", "Каталог Modrinth · каждый модпак устанавливается в отдельную Java-сборку."),
         container(
-            column![
-                icon("package", PURPLE, 26.0),
-                text("Модпаки появятся здесь").size(15).color(TEXT),
-                text("Планируется импорт Modrinth .mrpack и CurseForge ZIP. Установка будет создавать отдельный игровой экземпляр.")
+            row![
+                text_input("Найти модпак: Create, Cobblemon, Vanilla+…", &app.modpack_search)
+                    .on_input(Message::ModpackSearchChanged)
+                    .on_submit(Message::SearchModpacks)
+                    .padding(10)
                     .size(10)
-                    .color(MUTED),
-                primary_button("Перейти к моим сборкам", Message::Navigate(Page::Instances)),
-            ]
-            .spacing(9),
+                    .width(Length::Fill),
+                primary_button("Найти", Message::SearchModpacks),
+            ].spacing(8)
         )
-        .padding(20)
+        .padding(12)
         .width(Length::Fill)
         .style(|_| glass_style(PANEL, EDGE)),
-    ]
-    .spacing(14)
-    .into()
+    ].spacing(12).width(Length::Fill);
+
+    if app.modpacks_busy {
+        content = content.push(text("Загружаю каталог или устанавливаю выбранный модпак…").size(9).color(MUTED));
+    }
+    if app.modpack_results.is_empty() && !app.modpacks_busy {
+        content = content.push(
+            container(
+                column![
+                    icon("package", PURPLE, 25.0),
+                    text("Подходящие модпаки не найдены").size(12).color(TEXT),
+                    text("Поищи по названию или автору.").size(9).color(MUTED),
+                ].spacing(7).align_x(Alignment::Center)
+            )
+            .padding(18)
+            .width(Length::Fill)
+            .style(|_| glass_style(PANEL, EDGE))
+        );
+    }
+    content = content.push(results);
+    if let Some(notice) = &app.notice {
+        content = content.push(container(text(notice.clone()).size(9).color(TEXT))
+            .padding(10).width(Length::Fill)
+            .style(|_| glass_style(CYAN_DARK, EDGE_BRIGHT)));
+    }
+    content.into()
 }
 
 fn downloads_page(app: &App) -> Element<'_, Message> {
