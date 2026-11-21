@@ -36,6 +36,7 @@ pub enum Page {
     Modpacks,
     Downloads,
     Accounts,
+    Wardrobe,
     Settings,
 }
 
@@ -77,6 +78,21 @@ pub enum Message {
     AddOfflineAccount,
     SelectAccount(String),
     DeleteAccount(String),
+    SelectWardrobeAccount(String),
+    SkinNameChanged(String),
+    SkinModelChanged(store::SkinModel),
+    PickSkinFile,
+    SkinFilePicked {
+        account_uuid: String,
+        requested_name: String,
+        model: store::SkinModel,
+        result: Result<Option<(String, Vec<u8>)>, String>,
+    },
+    SelectSkin(String),
+    ActivateSkin(String),
+    RenameSelectedSkin,
+    SetSkinModel(String, store::SkinModel),
+    DeleteSkin(String),
     MicrosoftClientIdChanged(String),
     SaveMicrosoftClientId,
     StartMicrosoftLogin,
@@ -109,11 +125,30 @@ pub struct App {
     device_code: Option<DeviceCodePrompt>,
     auth_busy: bool,
     launch_busy: Option<String>,
+    wardrobe_account_id: Option<String>,
+    wardrobe_skins: Vec<store::SkinEntry>,
+    wardrobe_active_skin_id: Option<String>,
+    wardrobe_selected_skin_id: Option<String>,
+    skin_name: String,
+    skin_model: store::SkinModel,
 }
 
 impl Default for App {
     fn default() -> Self {
         let data = store::load();
+        let wardrobe_account_id = data.settings.selected_account_id.as_ref()
+            .and_then(|id| data.accounts.iter().find(|account| &account.id == id))
+            .filter(|account| account.kind == AccountKind::Offline)
+            .map(|account| account.id.clone())
+            .or_else(|| data.accounts.iter()
+                .find(|account| account.kind == AccountKind::Offline)
+                .map(|account| account.id.clone()));
+        let wardrobe_collection = wardrobe_account_id.as_ref()
+            .and_then(|id| data.accounts.iter().find(|account| &account.id == id))
+            .and_then(|account| store::load_skin_collection(&account.uuid).ok())
+            .unwrap_or_default();
+        let wardrobe_selected_skin_id = wardrobe_collection.active_skin_id.clone()
+            .or_else(|| wardrobe_collection.skins.first().map(|skin| skin.id.clone()));
         Self {
             page: Page::Home,
             platform: PlatformChoice::Java,
@@ -133,6 +168,12 @@ impl Default for App {
             device_code: None,
             auth_busy: false,
             launch_busy: None,
+            wardrobe_account_id,
+            wardrobe_skins: wardrobe_collection.skins,
+            wardrobe_active_skin_id: wardrobe_collection.active_skin_id,
+            wardrobe_selected_skin_id,
+            skin_name: String::new(),
+            skin_model: store::SkinModel::Classic,
             data,
         }
     }
@@ -143,6 +184,10 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         Message::Navigate(page) => {
             app.page = page;
             app.notice = None;
+            if page == Page::Wardrobe {
+                ensure_wardrobe_account(app);
+                refresh_wardrobe(app);
+            }
             if page == Page::Instances && app.version_platform != Some(app.platform.into()) {
                 let platform = app.platform.into();
                 app.versions_busy = true;
@@ -368,6 +413,152 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 .err()
                 .map(|error| format!("Не удалось сохранить удаление: {error}"))
                 .or_else(|| Some("Аккаунт удалён из GlowstoneCL.".into()));
+        }
+        Message::SelectWardrobeAccount(account_id) => {
+            if app.data.accounts.iter().any(|account| {
+                account.id == account_id && account.kind == AccountKind::Offline
+            }) {
+                app.wardrobe_account_id = Some(account_id);
+                app.wardrobe_selected_skin_id = None;
+                app.skin_name.clear();
+                refresh_wardrobe(app);
+                app.notice = None;
+            } else {
+                app.notice = Some("Гардероб доступен только для offline-аккаунтов.".into());
+            }
+        }
+        Message::SkinNameChanged(value) => app.skin_name = value,
+        Message::SkinModelChanged(model) => app.skin_model = model,
+        Message::PickSkinFile => {
+            let Some(account_id) = app.wardrobe_account_id.as_deref() else {
+                app.notice = Some("Сначала выбери offline-аккаунт.".into());
+                return iced::Task::none();
+            };
+            let Some(account) = app.data.accounts.iter().find(|account| {
+                account.id == account_id && account.kind == AccountKind::Offline
+            }) else {
+                app.notice = Some("Выбранный offline-аккаунт не найден.".into());
+                return iced::Task::none();
+            };
+            let account_uuid = account.uuid.clone();
+            let requested_name = app.skin_name.clone();
+            let model = app.skin_model;
+            app.notice = Some("Выбери PNG-файл скина размером 64×64 или 64×32.".into());
+            return iced::Task::perform(
+                async move {
+                    let picked = rfd::AsyncFileDialog::new()
+                        .add_filter("Minecraft skin (PNG)", &["png"])
+                        .pick_file()
+                        .await;
+                    match picked {
+                        Some(file) => {
+                            let file_name = file.file_name();
+                            let bytes = file.read().await;
+                            Ok(Some((file_name, bytes)))
+                        }
+                        None => Ok(None),
+                    }
+                },
+                move |result| Message::SkinFilePicked {
+                    account_uuid,
+                    requested_name,
+                    model,
+                    result,
+                },
+            );
+        }
+        Message::SkinFilePicked { account_uuid, requested_name, model, result } => {
+            match result {
+                Ok(Some((file_name, bytes))) => {
+                    let fallback_name = file_name.rsplit_once('.')
+                        .map(|(stem, _)| stem)
+                        .unwrap_or(file_name.as_str());
+                    let name = if requested_name.trim().is_empty() {
+                        fallback_name
+                    } else {
+                        requested_name.trim()
+                    };
+                    match store::import_skin(&account_uuid, name, &bytes, model) {
+                        Ok(collection) => {
+                            let is_current = app.wardrobe_account_id.as_ref()
+                                .and_then(|id| app.data.accounts.iter().find(|account| &account.id == id))
+                                .is_some_and(|account| account.uuid == account_uuid);
+                            if is_current {
+                                app.wardrobe_skins = collection.skins;
+                                app.wardrobe_active_skin_id = collection.active_skin_id.clone();
+                                app.wardrobe_selected_skin_id = collection.skins.last().map(|skin| skin.id.clone());
+                                app.skin_name.clear();
+                            }
+                            app.notice = Some(format!("Скин «{name}» добавлен в локальный гардероб."));
+                        }
+                        Err(error) => app.notice = Some(error),
+                    }
+                }
+                Ok(None) => app.notice = None,
+                Err(error) => app.notice = Some(error),
+            }
+        }
+        Message::SelectSkin(id) => {
+            if let Some(skin) = app.wardrobe_skins.iter().find(|skin| skin.id == id) {
+                app.wardrobe_selected_skin_id = Some(id);
+                app.skin_name = skin.name.clone();
+            }
+        }
+        Message::ActivateSkin(id) => {
+            if let Some(account) = wardrobe_account(app) {
+                match store::set_active_skin(&account.uuid, &id) {
+                    Ok(collection) => {
+                        app.wardrobe_skins = collection.skins;
+                        app.wardrobe_active_skin_id = collection.active_skin_id;
+                        app.wardrobe_selected_skin_id = Some(id);
+                        app.notice = Some("Активный скин сохранён для этого offline-аккаунта.".into());
+                    }
+                    Err(error) => app.notice = Some(error),
+                }
+            }
+        }
+        Message::RenameSelectedSkin => {
+            let selected_id = app.wardrobe_selected_skin_id.clone();
+            if let (Some(account), Some(skin_id)) = (wardrobe_account(app), selected_id) {
+                match store::rename_skin(&account.uuid, &skin_id, &app.skin_name) {
+                    Ok(collection) => {
+                        app.wardrobe_skins = collection.skins;
+                        app.wardrobe_active_skin_id = collection.active_skin_id;
+                        app.notice = Some("Название скина обновлено.".into());
+                    }
+                    Err(error) => app.notice = Some(error),
+                }
+            }
+        }
+        Message::SetSkinModel(id, model) => {
+            if let Some(account) = wardrobe_account(app) {
+                match store::set_skin_model(&account.uuid, &id, model) {
+                    Ok(collection) => {
+                        app.wardrobe_skins = collection.skins;
+                        app.wardrobe_active_skin_id = collection.active_skin_id;
+                        app.skin_model = model;
+                        app.notice = Some(format!("Модель скина изменена: {}.", model.label()));
+                    }
+                    Err(error) => app.notice = Some(error),
+                }
+            }
+        }
+        Message::DeleteSkin(id) => {
+            if let Some(account) = wardrobe_account(app) {
+                match store::delete_skin(&account.uuid, &id) {
+                    Ok(collection) => {
+                        app.wardrobe_skins = collection.skins;
+                        app.wardrobe_active_skin_id = collection.active_skin_id.clone();
+                        if app.wardrobe_selected_skin_id.as_deref() == Some(id.as_str()) {
+                            app.wardrobe_selected_skin_id = collection.active_skin_id
+                                .or_else(|| collection.skins.first().map(|skin| skin.id.clone()));
+                            app.skin_name.clear();
+                        }
+                        app.notice = Some("Скин удалён из локального гардероба.".into());
+                    }
+                    Err(error) => app.notice = Some(error),
+                }
+            }
         }
         Message::MicrosoftClientIdChanged(value) => app.client_id = value,
         Message::SaveMicrosoftClientId => {
@@ -635,6 +826,7 @@ fn sidebar(app: &App) -> Element<'_, Message> {
         section_label("СИСТЕМА"),
         nav_button("download", "Загрузки", Page::Downloads, app.page),
         nav_button("user", "Аккаунты", Page::Accounts, app.page),
+        nav_button("shirt", "Гардероб", Page::Wardrobe, app.page),
         nav_button("settings", "Настройки", Page::Settings, app.page),
     ]
     .spacing(6);
@@ -849,6 +1041,7 @@ fn main_content(app: &App) -> Element<'_, Message> {
         Page::Home => home_page(app),
         Page::Instances => instances_page(app),
         Page::Accounts => accounts_page(app),
+        Page::Wardrobe => wardrobe_page(app),
         Page::Settings => settings_page(app),
         Page::Catalog => catalog_page(),
         Page::Modpacks => modpacks_page(),
@@ -1612,6 +1805,299 @@ fn instance_card(instance: &GameInstance, selected: bool) -> Element<'static, Me
     .padding(13)
     .width(Length::Fill)
     .style(|_| glass_style(PANEL, EDGE))
+    .into()
+}
+
+fn wardrobe_account(app: &App) -> Option<&AccountProfile> {
+    app.wardrobe_account_id.as_ref()
+        .and_then(|id| app.data.accounts.iter().find(|account| {
+            &account.id == id && account.kind == AccountKind::Offline
+        }))
+}
+
+fn ensure_wardrobe_account(app: &mut App) {
+    let current_is_offline = app.wardrobe_account_id.as_ref().is_some_and(|id| {
+        app.data.accounts.iter().any(|account| {
+            &account.id == id && account.kind == AccountKind::Offline
+        })
+    });
+    if !current_is_offline {
+        app.wardrobe_account_id = app.data.accounts.iter()
+            .find(|account| account.kind == AccountKind::Offline)
+            .map(|account| account.id.clone());
+    }
+}
+
+fn refresh_wardrobe(app: &mut App) {
+    let Some(account) = wardrobe_account(app) else {
+        app.wardrobe_skins.clear();
+        app.wardrobe_active_skin_id = None;
+        app.wardrobe_selected_skin_id = None;
+        return;
+    };
+    match store::load_skin_collection(&account.uuid) {
+        Ok(collection) => {
+            app.wardrobe_active_skin_id = collection.active_skin_id.clone();
+            app.wardrobe_skins = collection.skins;
+            if !app.wardrobe_selected_skin_id.as_ref().is_some_and(|id| {
+                app.wardrobe_skins.iter().any(|skin| &skin.id == id)
+            }) {
+                app.wardrobe_selected_skin_id = app.wardrobe_active_skin_id.clone()
+                    .or_else(|| app.wardrobe_skins.first().map(|skin| skin.id.clone()));
+            }
+        }
+        Err(error) => app.notice = Some(error),
+    }
+}
+
+fn wardrobe_page(app: &App) -> Element<'_, Message> {
+    let mut account_picker = row![].spacing(8).width(Length::Fill);
+    let offline_accounts: Vec<_> = app.data.accounts.iter()
+        .filter(|account| account.kind == AccountKind::Offline)
+        .collect();
+
+    if offline_accounts.is_empty() {
+        return column![
+            section_header("ГАРДЕРОБ", "Локальные скины для offline-аккаунтов."),
+            container(
+                column![
+                    icon("user", PURPLE, 28.0),
+                    text("Нет offline-аккаунтов").size(14).color(TEXT),
+                    text("Сначала создай локальный профиль в разделе «Аккаунты». Скины Microsoft-аккаунтов этот гардероб не изменяет.")
+                        .size(10)
+                        .color(MUTED),
+                    primary_button("Перейти к аккаунтам", Message::Navigate(Page::Accounts)),
+                ]
+                .spacing(10)
+                .align_x(Alignment::Center),
+            )
+            .padding(22)
+            .width(Length::Fill)
+            .style(|_| glass_style(PANEL, EDGE)),
+        ]
+        .spacing(14)
+        .into();
+    }
+
+    for account in &offline_accounts {
+        let active = app.wardrobe_account_id.as_deref() == Some(account.id.as_str());
+        account_picker = account_picker.push(
+            button(text(account.name.clone()).size(10).color(if active { CYAN } else { TEXT }))
+                .on_press(Message::SelectWardrobeAccount(account.id.clone()))
+                .padding([9, 13])
+                .style(move |theme, status| {
+                    let mut style = button::secondary(theme, status);
+                    style.background = Some(if active { CYAN_DARK } else { PANEL_LIGHT }.into());
+                    style.text_color = if active { CYAN } else { TEXT };
+                    style.border = Border::default().rounded(10).width(1)
+                        .color(if active { EDGE_BRIGHT } else { EDGE });
+                    style
+                }),
+        );
+    }
+
+    let Some(account) = wardrobe_account(app) else {
+        return column![
+            section_header("ГАРДЕРОБ", "Локальные скины для offline-аккаунтов."),
+            text("Выбери offline-аккаунт.").size(11).color(MUTED),
+            account_picker,
+        ]
+        .spacing(12)
+        .into();
+    };
+    let account_uuid = account.uuid.clone();
+
+    let import_panel = container(
+        column![
+            row![
+                icon("image", PURPLE, 18.0),
+                text("Добавить скин").size(14).color(TEXT),
+                Space::new().width(Length::Fill),
+                status_chip("PNG · ДО 2 МБ", PANEL_LIGHT, MUTED),
+            ]
+            .align_y(Alignment::Center)
+            .spacing(8),
+            text("Поддерживаются стандартные PNG-текстуры Minecraft 64×64 и старые 64×32.")
+                .size(9)
+                .color(MUTED),
+            text_input("Название (необязательно, возьмём имя файла)", &app.skin_name)
+                .on_input(Message::SkinNameChanged)
+                .padding(10)
+                .size(10),
+            row![
+                choice_button("Steve · Classic", app.skin_model == store::SkinModel::Classic,
+                    Message::SkinModelChanged(store::SkinModel::Classic)),
+                choice_button("Alex · Slim", app.skin_model == store::SkinModel::Slim,
+                    Message::SkinModelChanged(store::SkinModel::Slim)),
+                Space::new().width(Length::Fill),
+                primary_button("Выбрать PNG", Message::PickSkinFile),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        ]
+        .spacing(9),
+    )
+    .padding(15)
+    .width(Length::Fill)
+    .style(|_| glass_style(PANEL, EDGE));
+
+    let active_preview: Element<'_, Message> = if let Some(active_id) = app.wardrobe_active_skin_id.as_deref() {
+        if let Ok(path) = store::skin_image_path(&account_uuid, active_id) {
+            if let Some(skin) = app.wardrobe_skins.iter().find(|skin| skin.id == active_id) {
+                container(
+                    row![
+                        image::Image::new(image::Handle::from_path(path))
+                            .width(Length::Fixed(112.0))
+                            .height(Length::Fixed(112.0))
+                            .content_fit(ContentFit::Contain),
+                        column![
+                            text("АКТИВНЫЙ СКИН").size(8).color(CYAN),
+                            text(skin.name.clone()).size(14).color(TEXT),
+                            text(skin.model.label()).size(9).color(MUTED),
+                            text(if skin.legacy { "Legacy PNG · 64×32" } else { "PNG · 64×64" })
+                                .size(8).color(SUBTLE),
+                        ]
+                        .spacing(6),
+                        Space::new().width(Length::Fill),
+                        status_chip("ВЫБРАН", CYAN_DARK, CYAN),
+                    ]
+                    .align_y(Alignment::Center)
+                    .spacing(15),
+                )
+                .padding(14)
+                .width(Length::Fill)
+                .style(|_| glass_style(CYAN_DARK, EDGE_BRIGHT))
+                .into()
+            } else {
+                Space::new().height(0).into()
+            }
+        } else {
+            Space::new().height(0).into()
+        }
+    } else {
+        container(
+            column![
+                icon("image", SUBTLE, 24.0),
+                text("Гардероб пока пуст").size(12).color(TEXT),
+                text("Добавь PNG-файл, чтобы сохранить первый скин для этого аккаунта.")
+                    .size(9).color(MUTED),
+            ]
+            .spacing(7)
+            .align_x(Alignment::Center),
+        )
+        .padding(18)
+        .width(Length::Fill)
+        .style(|_| glass_style(PANEL, EDGE))
+        .into()
+    };
+
+    let mut skin_list = column![
+        row![
+            column![
+                text("Сохранённые скины").size(14).color(TEXT),
+                text(format!("{} файлов · только на этом устройстве", app.wardrobe_skins.len()))
+                    .size(9).color(MUTED),
+            ]
+            .spacing(3),
+            Space::new().width(Length::Fill),
+            if app.wardrobe_selected_skin_id.is_some() {
+                quiet_button("Переименовать", Message::RenameSelectedSkin)
+            } else {
+                status_chip("НЕТ ВЫБОРА", PANEL_LIGHT, MUTED)
+            },
+        ]
+        .align_y(Alignment::Center),
+    ]
+    .spacing(9)
+    .width(Length::Fill);
+
+    if app.wardrobe_skins.is_empty() {
+        skin_list = skin_list.push(
+            container(text("Здесь появятся импортированные скины.").size(10).color(MUTED))
+                .padding(14)
+                .width(Length::Fill)
+                .style(|_| glass_style(PANEL, EDGE)),
+        );
+    } else {
+        for skin in &app.wardrobe_skins {
+            let skin_id = skin.id.clone();
+            let active = app.wardrobe_active_skin_id.as_deref() == Some(skin.id.as_str());
+            let selected = app.wardrobe_selected_skin_id.as_deref() == Some(skin.id.as_str());
+            let preview = store::skin_image_path(&account_uuid, &skin.id).ok()
+                .map(|path| image::Image::new(image::Handle::from_path(path))
+                    .width(Length::Fixed(76.0))
+                    .height(Length::Fixed(76.0))
+                    .content_fit(ContentFit::Contain));
+            let preview_element: Element<'_, Message> = match preview {
+                Some(view) => view.into(),
+                None => icon("image", SUBTLE, 22.0),
+            };
+            skin_list = skin_list.push(
+                container(
+                    row![
+                        container(preview_element)
+                            .width(84)
+                            .height(84)
+                            .align_x(Alignment::Center)
+                            .align_y(Alignment::Center)
+                            .style(|_| glass_style(PANEL_LIGHT, EDGE)),
+                        column![
+                            text(skin.name.clone()).size(11).color(TEXT),
+                            text(skin.model.label()).size(8).color(MUTED),
+                            text(if skin.legacy { "64×32 · legacy" } else { "64×64" })
+                                .size(8).color(SUBTLE),
+                            row![
+                                quiet_button("Выбрать", Message::SelectSkin(skin_id.clone())),
+                                if active {
+                                    status_chip("АКТИВЕН", CYAN_DARK, CYAN)
+                                } else {
+                                    quiet_button("Сделать активным", Message::ActivateSkin(skin_id.clone()))
+                                },
+                            ]
+                            .spacing(6),
+                            row![
+                                quiet_button("Steve", Message::SetSkinModel(skin_id.clone(), store::SkinModel::Classic)),
+                                quiet_button("Alex", Message::SetSkinModel(skin_id.clone(), store::SkinModel::Slim)),
+                                button(icon("trash", RED, 13.0))
+                                    .on_press(Message::DeleteSkin(skin_id.clone()))
+                                    .padding(8)
+                                    .style(button::text),
+                            ]
+                            .spacing(6),
+                        ]
+                        .spacing(5),
+                        Space::new().width(Length::Fill),
+                        if selected { icon("check-circle", CYAN, 16.0) } else { Space::new().width(0).into() },
+                    ]
+                    .align_y(Alignment::Center)
+                    .spacing(12),
+                )
+                .padding(10)
+                .width(Length::Fill)
+                .style(move |_| glass_style(
+                    if selected { Color::from_rgba(0.12, 0.23, 0.34, 0.92) } else { PANEL },
+                    if selected { EDGE_BRIGHT } else { EDGE },
+                )),
+            );
+        }
+    }
+
+    column![
+        section_header("ГАРДЕРОБ", format!("Локальные скины для offline-профиля {}.", account.name)),
+        account_picker,
+        import_panel,
+        active_preview,
+        text_input("Новое название для выбранного скина", &app.skin_name)
+            .on_input(Message::SkinNameChanged)
+            .padding(9)
+            .size(10),
+        skin_list,
+        text("Скины хранятся локально отдельно для каждого offline UUID. Чистый Minecraft пока не получает эту текстуру автоматически — для отображения внутри игры потребуется совместимый клиентский механизм.")
+            .size(8)
+            .color(SUBTLE),
+    ]
+    .spacing(12)
+    .width(Length::Fill)
     .into()
 }
 
