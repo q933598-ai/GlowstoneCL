@@ -51,8 +51,8 @@ impl HorizonFlavor {
 
     fn release_api(self) -> &'static str {
         match self {
-            Self::Official => "https://api.github.com/repos/horizon-rust/horizon/releases?per_page=100",
-            Self::Offline => "https://api.github.com/repos/gerdaroot/Horizon-Offline-Launcher/releases?per_page=100",
+            Self::Official => "https://api.github.com/repos/horizon-rust/horizon/releases",
+            Self::Offline => "https://api.github.com/repos/gerdaroot/Horizon-Offline-Launcher/releases",
         }
     }
 
@@ -223,7 +223,9 @@ async fn fetch_horizon_version_choices(
         if !release.assets.iter().any(|asset| asset.name == asset_name) {
             continue;
         }
-        let id = horizon_release_version(&release)?;
+        let Ok(id) = horizon_release_version(&release) else {
+            continue;
+        };
         let kind = if release.title.starts_with("Nightly ") {
             "Nightly"
         } else {
@@ -781,9 +783,38 @@ async fn fetch_horizon_releases(
     cache_path: &Path,
     flavor: HorizonFlavor,
 ) -> Result<Vec<GithubRelease>, String> {
-    let value = fetch_json_cached(client, flavor.release_api(), cache_path).await?;
-    serde_json::from_value(value)
-        .map_err(|error| format!("Список релизов Horizon повреждён: {error}"))
+    let mut releases = Vec::new();
+    let cache_stem = cache_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(flavor.storage_name());
+
+    // GitHub paginates release history. Fetch pages until the last page so the
+    // version picker can include the earliest game tags, not just recent Nightlies.
+    for page in 1..=50_u32 {
+        let page_url = format!("{}?per_page=100&page={page}", flavor.release_api());
+        let page_cache = cache_path.with_file_name(format!("{cache_stem}-page-{page}.json"));
+        let value = match fetch_json_cached(client, &page_url, &page_cache).await {
+            Ok(value) => value,
+            Err(error) if page > 1 && !releases.is_empty() => {
+                eprintln!("[GlowstoneCL] Horizon release history stopped at page {}: {error}", page - 1);
+                break;
+            }
+            Err(error) => return Err(error),
+        };
+        let batch: Vec<GithubRelease> = serde_json::from_value(value)
+            .map_err(|error| format!("Список релизов Horizon повреждён: {error}"))?;
+        let count = batch.len();
+        releases.extend(batch);
+        if count < 100 {
+            break;
+        }
+    }
+
+    if releases.is_empty() {
+        return Err("GitHub не вернул ни одного релиза Horizon.".to_owned());
+    }
+    Ok(releases)
 }
 
 fn select_horizon_release<'a>(
