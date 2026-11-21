@@ -164,6 +164,16 @@ fn selected_version_dependency(version: &ProjectVersion) -> Result<(String, Load
     Ok((minecraft, loader))
 }
 
+fn loader_dependency_key(loader: LoaderKind) -> &'static str {
+    match loader {
+        LoaderKind::Fabric => "fabric-loader",
+        LoaderKind::Forge => "forge",
+        LoaderKind::NeoForge => "neoforge",
+        LoaderKind::Quilt => "quilt-loader",
+        _ => "",
+    }
+}
+
 fn hex_digest(bytes: &[u8]) -> String {
     let mut output = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
@@ -201,7 +211,7 @@ fn verify_hashes(bytes: &[u8], hashes: &Value) -> Result<(), String> {
 async fn download_mrpack(
     http: &reqwest::Client,
     project_id: &str,
-) -> Result<(Vec<u8>, String, String, LoaderKind), String> {
+ ) -> Result<(Vec<u8>, String, String, LoaderKind), String> {
     let versions_url = format!("{API}/project/{project_id}/version");
     let response = http.get(versions_url).send().await
         .map_err(|error| format!("Не удалось получить версии модпака: {error}"))?
@@ -294,7 +304,9 @@ async fn install_index_files(
     http: &reqwest::Client,
     archive_bytes: &[u8],
     game_directory: &Path,
-) -> Result<usize, String> {
+    expected_minecraft: &str,
+    expected_loader: LoaderKind,
+) -> Result<(usize, String), String> {
     let mut archive = zip::ZipArchive::new(Cursor::new(archive_bytes.to_vec()))
         .map_err(|error| format!("Архив .mrpack не является корректным ZIP: {error}"))?;
     let index_value: Value = {
@@ -314,6 +326,19 @@ async fn install_index_files(
     {
         return Err("Версия формата или целевая игра .mrpack не поддерживается.".to_owned());
     }
+    let index_dependencies = index_value["dependencies"].as_object()
+        .ok_or_else(|| "В index.json отсутствует объект dependencies.".to_owned())?;
+    let index_minecraft = index_dependencies.get("minecraft").and_then(Value::as_str)
+        .ok_or_else(|| "В index.json не указана версия Minecraft.".to_owned())?;
+    if index_minecraft != expected_minecraft {
+        return Err(format!(
+            "Версии Minecraft в Modrinth API ({expected_minecraft}) и modrinth.index.json ({index_minecraft}) не совпадают."
+        ));
+    }
+    let dependency_key = loader_dependency_key(expected_loader);
+    let loader_version = index_dependencies.get(dependency_key).and_then(Value::as_str)
+        .ok_or_else(|| format!("В index.json отсутствует версия загрузчика {dependency_key}."))?
+        .to_owned();
     let files = index_value["files"].as_array()
         .ok_or_else(|| "В index.json отсутствует массив files.".to_owned())?;
     if files.len() > MAX_INDEX_FILES {
@@ -375,7 +400,41 @@ async fn install_index_files(
     }
 
     write_overrides(&mut archive, game_directory)?;
-    Ok(installed)
+    Ok((installed, loader_version))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_path_traversal_and_absolute_pack_paths() {
+        assert!(safe_relative_path("mods/example.jar").is_ok());
+        assert!(safe_relative_path("../outside.jar").is_err());
+        assert!(safe_relative_path("/tmp/outside.jar").is_err());
+        assert!(safe_relative_path("mods\\\\outside.jar").is_err());
+    }
+
+    #[test]
+    fn selects_java_loader_from_modrinth_version_metadata() {
+        let version: ProjectVersion = serde_json::from_str(
+            r#"{"id":"version","name":"Pack","version_number":"1.0","game_versions":["1.20.1"],"loaders":["fabric"],"files":[]}"#
+        ).unwrap();
+        assert_eq!(
+            selected_version_dependency(&version).unwrap(),
+            ("1.20.1".to_owned(), LoaderKind::Fabric),
+        );
+    }
+
+    #[test]
+    fn hash_verification_rejects_modified_pack_files() {
+        assert!(verify_hashes(b"expected", &serde_json::json!({
+            "sha256": format!("{:x}", Sha256::digest(b"expected"))
+        })).is_ok());
+        assert!(verify_hashes(b"tampered", &serde_json::json!({
+            "sha256": format!("{:x}", Sha256::digest(b"expected"))
+        })).is_err());
+    }
 }
 
 /// Installs the latest compatible .mrpack as a new Java instance. Any error moves the
@@ -403,7 +462,9 @@ pub async fn install_project(project_id: String, project_name: String) -> Result
         }
     };
     let result = async {
-        let installed = install_index_files(&http, &bytes, &game_directory).await?;
+        let (installed, loader_version) = install_index_files(
+            &http, &bytes, &game_directory, &minecraft, loader,
+        ).await?;
         if installed == 0 {
             return Err("В этом модпаке нет клиентских файлов для установки.".to_owned());
         }
@@ -411,6 +472,9 @@ pub async fn install_project(project_id: String, project_name: String) -> Result
             "source": "modrinth",
             "project_id": project_id,
             "version": version_name,
+            "minecraft": minecraft,
+            "loader": format!("{loader:?}"),
+            "loader_version": loader_version,
             "installed_files": installed,
         });
         tokio::fs::write(
