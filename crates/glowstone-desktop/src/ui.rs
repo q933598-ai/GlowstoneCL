@@ -43,6 +43,7 @@ pub enum Page {
 pub enum PlatformChoice {
     Java,
     Horizon,
+    HorizonOffline,
 }
 
 impl From<PlatformChoice> for GamePlatform {
@@ -50,6 +51,7 @@ impl From<PlatformChoice> for GamePlatform {
         match value {
             PlatformChoice::Java => Self::Java,
             PlatformChoice::Horizon => Self::Horizon,
+            PlatformChoice::HorizonOffline => Self::HorizonOffline,
         }
     }
 }
@@ -131,7 +133,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             app.platform = platform;
             app.loader = match platform {
                 PlatformChoice::Java => LoaderKind::Vanilla,
-                PlatformChoice::Horizon => LoaderKind::HorizonContent,
+                PlatformChoice::Horizon | PlatformChoice::HorizonOffline => LoaderKind::HorizonContent,
             };
             if app.instance_version.trim().is_empty() {
                 app.instance_version = "stable".to_owned();
@@ -544,6 +546,7 @@ fn sidebar(app: &App) -> Element<'_, Message> {
         section_label("ПЛАТФОРМЫ"),
         platform_nav("minecraft", "Minecraft Java", PlatformChoice::Java, app.platform),
         platform_nav("horizon", "Minecraft Horizon", PlatformChoice::Horizon, app.platform),
+        platform_nav("user", "Horizon Offline", PlatformChoice::HorizonOffline, app.platform),
     ]
     .spacing(6);
 
@@ -761,6 +764,7 @@ fn home_page(app: &App) -> Element<'_, Message> {
     let platforms = row![
         platform_card(app.art.clone(), PlatformChoice::Java, app.platform == PlatformChoice::Java),
         platform_card(app.art.clone(), PlatformChoice::Horizon, app.platform == PlatformChoice::Horizon),
+        platform_card(app.art.clone(), PlatformChoice::HorizonOffline, app.platform == PlatformChoice::HorizonOffline),
     ]
     .spacing(14)
     .width(Length::Fill);
@@ -916,11 +920,20 @@ fn platform_card(art: image::Handle, platform: PlatformChoice, selected: bool) -
         ),
         PlatformChoice::Horizon => (
             "Minecraft Horizon",
-            "Нативный Rust runtime",
-            "Отдельная экосистема контентных и native-модов",
+            "Официальный Rust runtime",
+            "Microsoft-аккаунт и официальные Nightly-сборки",
             Color::from_rgba(0.23, 0.10, 0.045, 0.66),
             ORANGE,
-            ["HMOD", "HNMOD", "Content", "Native"],
+            ["HMOD", "HNMOD", "Official", "Online"],
+            Rectangle::<u32> { x: 190, y: 80, width: 510, height: 270 },
+        ),
+        PlatformChoice::HorizonOffline => (
+            "Horizon Offline",
+            "Неофициальный offline fork",
+            "Без Microsoft-входа, нужны локальные файлы Minecraft 26.3",
+            Color::from_rgba(0.18, 0.12, 0.25, 0.72),
+            PURPLE,
+            ["Offline", "26.3", "HMOD", "HNMOD"],
             Rectangle::<u32> { x: 190, y: 80, width: 510, height: 270 },
         ),
     };
@@ -1206,7 +1219,7 @@ fn instances_page(app: &App) -> Element<'_, Message> {
             LoaderKind::NeoForge,
             LoaderKind::Quilt,
         ],
-        PlatformChoice::Horizon => &[
+        PlatformChoice::Horizon | PlatformChoice::HorizonOffline => &[
             LoaderKind::HorizonContent,
             LoaderKind::HorizonNative,
         ],
@@ -1332,6 +1345,7 @@ fn instance_card(instance: &GameInstance, selected: bool) -> Element<'static, Me
     let platform = match instance.platform {
         GamePlatform::Java => "Minecraft Java",
         GamePlatform::Horizon => "Minecraft Horizon",
+        GamePlatform::HorizonOffline => "Horizon Offline (неофициальная сборка)",
     };
     let state = match instance.state {
         InstanceState::NotInstalled => "Не установлена",
@@ -1402,7 +1416,7 @@ fn accounts_page(app: &App) -> Element<'_, Message> {
             ]
             .spacing(9)
             .align_y(Alignment::Center),
-            text("Для одиночной игры и серверов с отключённой online-проверкой. Не даёт доступ к официальной авторизации.")
+            text("Для одиночной игры, offline-серверов и Horizon Offline. Не даёт доступ к официальным online-серверам.")
                 .size(9)
                 .color(MUTED),
             row![
