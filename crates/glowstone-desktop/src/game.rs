@@ -583,7 +583,7 @@ async fn install_offline_skins_mod(
         Ok(existing) => {
             let expected = file.hashes.sha512.as_deref()
                 .ok_or_else(|| "Modrinth не прислал SHA-512 для OfflineSkins.".to_owned())?;
-            digest_hex(sha2::Sha512::digest(&existing)) != expected
+            digest_hex(sha2::Sha512::digest(&existing).as_slice()) != expected
         }
         Err(_) => true,
     };
@@ -604,7 +604,7 @@ async fn install_offline_skins_mod(
         }
         let expected = file.hashes.sha512.as_deref()
             .ok_or_else(|| "Modrinth не прислал SHA-512 для OfflineSkins.".to_owned())?;
-        let actual = digest_hex(sha2::Sha512::digest(&bytes));
+        let actual = digest_hex(sha2::Sha512::digest(&bytes).as_slice());
         if actual != expected {
             return Err("SHA-512 OfflineSkins не совпадает с контрольной суммой Modrinth.".to_owned());
         }
