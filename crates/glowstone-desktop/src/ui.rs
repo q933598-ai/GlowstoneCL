@@ -10,7 +10,9 @@ use iced::{
 use glowstone_core::{GameInstance, GamePlatform, InstanceState, LoaderKind};
 
 use crate::auth::{self, DeviceCodePrompt, PollResult};
+use crate::curseforge;
 use crate::game::{self, LaunchOutcome};
+use crate::modpacks;
 use crate::horizon_mods;
 use crate::mods;
 use crate::store::{self, AccountKind, AccountProfile, PersistedState};
