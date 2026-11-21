@@ -643,14 +643,28 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 app.notice = Some("Сначала выбери игровой аккаунт.".into());
                 return iced::Task::none();
             };
-            if account.kind != AccountKind::Microsoft {
-                app.notice = Some("Для offline-профиля можно хранить и просматривать скин, но Vanilla-клиент не применяет его без клиентского мода.".into());
-                return iced::Task::none();
-            }
             let Some(skin) = app.wardrobe_skins.iter().find(|skin| skin.id == id).cloned() else {
                 app.notice = Some("Скин не найден.".into());
                 return iced::Task::none();
             };
+            if account.kind == AccountKind::Offline {
+                match store::set_active_skin(&account.uuid, &id) {
+                    Ok(collection) => {
+                        app.wardrobe_skins = collection.skins;
+                        app.wardrobe_active_skin_id = collection.active_skin_id;
+                        app.wardrobe_selected_skin_id = Some(id.clone());
+                        app.rename_skin_name = skin.name.clone();
+                        refresh_skin_preview(app);
+                        app.notice = Some(format!(
+                            "Скин «{}» выбран для offline-игры. Он будет применён в Horizon Offline и в совместимых версиях Minecraft Java через Fabric при следующем запуске.",
+                            skin.name
+                        ));
+                    }
+                    Err(error) => app.notice = Some(error),
+                }
+                return iced::Task::none();
+            }
+
             let path = match store::skin_image_path(&account.uuid, &id) {
                 Ok(path) => path,
                 Err(error) => {
@@ -2063,9 +2077,9 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
             .align_y(Alignment::Center)
             .spacing(8),
             text(if account.kind == AccountKind::Microsoft {
-                "Для Microsoft-аккаунта импортированный скин можно отправить в официальный профиль Minecraft."
+                "Для Microsoft-аккаунта скин можно отправить в официальный профиль Minecraft."
             } else {
-                "Для offline-профиля скин хранится локально. Чтобы он отображался в игре, нужен клиентский мод."
+                "GlowstoneCL применяет скин в Horizon Offline напрямую, а в совместимых версиях Java автоматически устанавливает Fabric и OfflineSkins."
             })
                 .size(9)
                 .color(MUTED),
@@ -2240,11 +2254,14 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
                                 } else {
                                     quiet_button("Сделать активным", Message::ActivateSkin(skin_id.clone()))
                                 },
-                                if account.kind == AccountKind::Microsoft {
-                                    quiet_button("Применить в Minecraft", Message::ApplySkin(skin_id.clone()))
-                                } else {
-                                    Space::new().width(0).into()
-                                },
+                                quiet_button(
+                                    if account.kind == AccountKind::Microsoft {
+                                        "Применить в Minecraft"
+                                    } else {
+                                        "Применить для игры"
+                                    },
+                                    Message::ApplySkin(skin_id.clone()),
+                                ),
                             ]
                             .spacing(6),
                             row![
@@ -2286,9 +2303,9 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
             .size(10),
         skin_list,
         text(if account.kind == AccountKind::Microsoft {
-            "Для Microsoft выбранный скин отправляется в профиль Minecraft Services. Для offline-профиля нужен отдельный клиентский мод: Vanilla не загружает локальные скины."
+            "Для Microsoft выбранный скин отправляется в официальный профиль Minecraft Services."
         } else {
-            "Offline-сетевой профиль и обычный Vanilla-клиент не могут получить локальную текстуру без клиентского мода. Сейчас она доступна в 3D-предпросмотре и локальном списке."
+            "Для Java автоматическая установка OfflineSkins сейчас доступна для 1.21.6–1.21.11 и 26.1–26.3 через Fabric. Vanilla-профиль GlowstoneCL подготовит с Fabric автоматически; Forge/NeoForge и более старые версии пока не поддерживаются. Horizon Offline получает скин напрямую."
         })
             .size(8)
             .color(SUBTLE),
