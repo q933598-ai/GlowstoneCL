@@ -15,11 +15,11 @@ pub struct DeviceCodePrompt {
     pub verification_uri: String,
     pub message: String,
     pub interval: u64,
+    pub expires_in: u64,
 }
 
 #[derive(Debug, Clone)]
 pub enum PollResult {
-    Pending(String),
     SignedIn {
         account: AccountProfile,
         refresh_token: String,
@@ -35,6 +35,8 @@ struct DeviceCodeResponse {
     message: String,
     #[serde(default = "default_interval")]
     interval: u64,
+    #[serde(default = "default_expires_in")]
+    expires_in: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,6 +49,10 @@ struct TokenResponse {
 
 fn default_interval() -> u64 {
     5
+}
+
+fn default_expires_in() -> u64 {
+    900
 }
 
 pub async fn request_device_code(client_id: String) -> Result<DeviceCodePrompt, String> {
@@ -85,6 +91,7 @@ pub async fn request_device_code(client_id: String) -> Result<DeviceCodePrompt, 
             device.message
         },
         interval: device.interval.max(5),
+        expires_in: device.expires_in.max(60),
     })
 }
 
@@ -92,72 +99,91 @@ pub async fn poll_device_code(
     client_id: String,
     device_code: String,
     interval: u64,
+    expires_in: u64,
 ) -> Result<PollResult, String> {
-    tokio::time::sleep(std::time::Duration::from_secs(interval.max(5))).await;
+    // Keep polling while the user completes browser sign-in. Microsoft explicitly
+    // requires retrying authorization_pending after the supplied interval.
+    let client = reqwest::Client::new();
+    let deadline = tokio::time::Instant::now()
+        + std::time::Duration::from_secs(expires_in.max(60));
+    let mut polling_interval = interval.max(5);
 
-    let response = reqwest::Client::new()
-        .post(TOKEN_ENDPOINT)
-        .form(&[
-            ("client_id", client_id.trim()),
-            (
-                "grant_type",
-                "urn:ietf:params:oauth:grant-type:device_code",
-            ),
-            ("device_code", device_code.as_str()),
-        ])
-        .send()
-        .await
-        .map_err(|error| format!("Не удалось проверить вход Microsoft: {error}"))?;
+    loop {
+        if tokio::time::Instant::now() >= deadline {
+            return Err("Код Microsoft истёк. Начни вход заново.".to_owned());
+        }
 
-    let status = response.status();
-    let body = response
-        .json::<Value>()
-        .await
-        .map_err(|error| format!("Не удалось прочитать ответ Microsoft: {error}"))?;
+        tokio::time::sleep(std::time::Duration::from_secs(polling_interval)).await;
 
-    if !status.is_success() {
-        let code = body["error"].as_str().unwrap_or_default();
-        let description = body["error_description"]
-            .as_str()
-            .unwrap_or("Microsoft не завершил авторизацию.");
+        if tokio::time::Instant::now() >= deadline {
+            return Err("Код Microsoft истёк. Начни вход заново.".to_owned());
+        }
 
-        return match code {
-            "authorization_pending" => Ok(PollResult::Pending(
-                "Ожидаю подтверждения на странице Microsoft…".to_owned(),
-            )),
-            "slow_down" => Ok(PollResult::Pending(
-                "Microsoft просит проверять реже. Подожди несколько секунд и повтори.".to_owned(),
-            )),
-            "authorization_declined" => Err("Вход Microsoft был отклонён.".to_owned()),
-            "expired_token" => Err(
-                "Код Microsoft истёк. Начни вход заново.".to_owned(),
-            ),
-            _ => Err(format!("Microsoft OAuth: {description}")),
-        };
+        let response = client
+            .post(TOKEN_ENDPOINT)
+            .form(&[
+                ("client_id", client_id.trim()),
+                (
+                    "grant_type",
+                    "urn:ietf:params:oauth:grant-type:device_code",
+                ),
+                ("device_code", device_code.as_str()),
+            ])
+            .send()
+            .await
+            .map_err(|error| format!("Не удалось проверить вход Microsoft: {error}"))?;
+
+        let status = response.status();
+        let body = response
+            .json::<Value>()
+            .await
+            .map_err(|error| format!("Не удалось прочитать ответ Microsoft: {error}"))?;
+
+        if !status.is_success() {
+            let code = body["error"].as_str().unwrap_or_default();
+            let description = body["error_description"]
+                .as_str()
+                .unwrap_or("Microsoft не завершил авторизацию.");
+
+            match code {
+                "authorization_pending" => continue,
+                "slow_down" => {
+                    polling_interval = polling_interval.saturating_add(5);
+                    continue;
+                }
+                "authorization_declined" => {
+                    return Err("Вход Microsoft был отклонён.".to_owned());
+                }
+                "expired_token" => {
+                    return Err("Код Microsoft истёк. Начни вход заново.".to_owned());
+                }
+                _ => return Err(format!("Microsoft OAuth: {description}")),
+            }
+        }
+
+        let tokens: TokenResponse = serde_json::from_value(body)
+            .map_err(|error| format!("Не удалось разобрать токены Microsoft: {error}"))?;
+
+        if let Some(error) = tokens.error {
+            return Err(tokens
+                .error_description
+                .unwrap_or_else(|| format!("Microsoft OAuth: {error}")));
+        }
+
+        let microsoft_access_token = tokens
+            .access_token
+            .ok_or_else(|| "Microsoft не выдал access token.".to_owned())?;
+        let refresh_token = tokens
+            .refresh_token
+            .ok_or_else(|| "Microsoft не выдал refresh token. Проверь scope offline_access.".to_owned())?;
+
+        let account = authenticate_minecraft(&microsoft_access_token).await?;
+
+        return Ok(PollResult::SignedIn {
+            account,
+            refresh_token,
+        });
     }
-
-    let tokens: TokenResponse = serde_json::from_value(body)
-        .map_err(|error| format!("Не удалось разобрать токены Microsoft: {error}"))?;
-
-    if let Some(error) = tokens.error {
-        return Err(tokens
-            .error_description
-            .unwrap_or_else(|| format!("Microsoft OAuth: {error}")));
-    }
-
-    let microsoft_access_token = tokens
-        .access_token
-        .ok_or_else(|| "Microsoft не выдал access token.".to_owned())?;
-    let refresh_token = tokens
-        .refresh_token
-        .ok_or_else(|| "Microsoft не выдал refresh token. Проверь scope offline_access.".to_owned())?;
-
-    let account = authenticate_minecraft(&microsoft_access_token).await?;
-
-    Ok(PollResult::SignedIn {
-        account,
-        refresh_token,
-    })
 }
 
 async fn authenticate_minecraft(microsoft_access_token: &str) -> Result<AccountProfile, String> {
@@ -259,6 +285,43 @@ async fn authenticate_minecraft(microsoft_access_token: &str) -> Result<AccountP
     let minecraft_access_token = minecraft_body["access_token"]
         .as_str()
         .ok_or_else(|| "Minecraft Services не вернул access token.".to_owned())?;
+
+    let entitlement_response = client
+        .get("https://api.minecraftservices.com/entitlements/mcstore")
+        .bearer_auth(minecraft_access_token)
+        .send()
+        .await
+        .map_err(|error| format!("Не удалось проверить лицензию Minecraft: {error}"))?;
+
+    let entitlement_status = entitlement_response.status();
+    let entitlement_body = entitlement_response
+        .json::<Value>()
+        .await
+        .map_err(|error| format!("Некорректный ответ о лицензии Minecraft: {error}"))?;
+
+    if !entitlement_status.is_success() {
+        return Err(format!(
+            "Minecraft Services не позволил проверить лицензию (HTTP {entitlement_status}). Проверь настройки доступа приложения Microsoft."
+        ));
+    }
+
+    let owns_java_edition = entitlement_body["items"]
+        .as_array()
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                matches!(
+                    item["name"].as_str(),
+                    Some("game_minecraft" | "product_minecraft")
+                )
+            })
+        });
+
+    if !owns_java_edition {
+        return Err(
+            "Microsoft-аккаунт вошёл успешно, но Minecraft Java Edition не найдена среди лицензий."
+                .to_owned(),
+        );
+    }
 
     let profile_response = client
         .get("https://api.minecraftservices.com/minecraft/profile")
