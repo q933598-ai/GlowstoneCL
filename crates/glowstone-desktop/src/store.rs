@@ -138,10 +138,30 @@ pub fn create_instance(
 
 pub fn remove_instance(instance_id: &str) -> Result<(), String> {
     let directory = instance_directory(instance_id)?;
-    if directory.exists() {
-        fs::remove_dir_all(&directory)
-            .map_err(|error| format!("Не удалось удалить папку сборки: {error}"))?;
+    if !directory.exists() {
+        return Ok(());
     }
+
+    // Keep worlds and configs recoverable: deleting a profile from the library
+    // moves its workspace into local trash instead of permanently purging it.
+    let base = BaseDirs::new()
+        .ok_or_else(|| "Не удалось определить каталог данных GlowstoneCL.".to_owned())?;
+    let instances_root = base.data_local_dir().join("GlowstoneCL").join("instances");
+    let trash = instances_root.join(".trash");
+    fs::create_dir_all(&trash)
+        .map_err(|error| format!("Не удалось создать корзину сборок: {error}"))?;
+
+    let id = Uuid::parse_str(instance_id)
+        .map_err(|_| "Некорректный идентификатор сборки.".to_owned())?;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let destination = trash.join(format!("{}-{timestamp}", id));
+
+    fs::rename(&directory, &destination)
+        .map_err(|error| format!("Не удалось переместить сборку в корзину: {error}"))?;
+
     Ok(())
 }
 
