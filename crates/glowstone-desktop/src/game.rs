@@ -34,6 +34,12 @@ const HORIZON_RELEASE_KEY: &str = "MU4oiIQcCxkZvbwSjjXs7SySCuM6ywRQ3nGaJYZG0gw="
 const HORIZON_OFFLINE_RELEASE_KEY: &str = "uzGcg2Sc1fAl26IpR2jEnhbmRhXTaiTyO9eWc2cpK1E=";
 const HORIZON_SIGNATURE_DOMAIN: &str = "horizon release ";
 const HORIZON_INSTALLED_MARKER: &str = ".installed";
+const OFFLINE_SKIN_INJECTOR_VERSION: &str = "0.1.2";
+const OFFLINE_SKIN_INJECTOR_URL: &str =
+    "https://github.com/NaivG/OfflineSkinInjector/releases/download/v0.1.2/offlineskininjector-0.1.2.jar";
+const OFFLINE_SKIN_INJECTOR_SHA256: &str =
+    "ca9586df45a1ca8065e575f24fbf1eb057f1ec17f1996d170346d654ea0b76c0";
+const OFFLINE_SKIN_INJECTOR_SIZE: usize = 175_821;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HorizonFlavor {
@@ -97,28 +103,6 @@ struct MojangVersionEntry {
     kind: String,
     #[serde(default, rename = "releaseTime")]
     release_time: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ModrinthSkinVersion {
-    version_number: String,
-    game_versions: Vec<String>,
-    loaders: Vec<String>,
-    files: Vec<ModrinthSkinFile>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ModrinthSkinFile {
-    url: String,
-    filename: String,
-    primary: bool,
-    size: u64,
-    hashes: ModrinthSkinHashes,
-}
-
-#[derive(Debug, Deserialize)]
-struct ModrinthSkinHashes {
-    sha512: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -480,176 +464,119 @@ pub async fn fetch_microsoft_skin(
     Ok(Some((bytes, model)))
 }
 
-async fn resolve_java_skin_version(input: &str) -> Result<String, String> {
-    let selector = java_version_selector(input);
-    let alias = match selector.as_str() {
-        "latest_release" => Some("stable"),
-        "latest_snapshot" => Some("snapshot"),
-        _ => None,
+/// Downloads the standalone GPL-3.0 OfflineSkinInjector Java agent from its
+/// upstream release. The pinned size and SHA-256 are checked before it is used.
+async fn ensure_offline_skin_injector(data_root: &Path) -> Result<PathBuf, String> {
+    let tools_dir = data_root.join("tools");
+    tokio::fs::create_dir_all(&tools_dir)
+        .await
+        .map_err(|error| format!("Не удалось создать каталог инструментов GlowstoneCL: {error}"))?;
+    let target = tools_dir.join(format!("offlineskininjector-{OFFLINE_SKIN_INJECTOR_VERSION}.jar"));
+
+    let is_valid = match tokio::fs::read(&target).await {
+        Ok(bytes) => {
+            bytes.len() == OFFLINE_SKIN_INJECTOR_SIZE
+                && digest_hex(sha2::Sha256::digest(&bytes).as_slice()) == OFFLINE_SKIN_INJECTOR_SHA256
+        }
+        Err(_) => false,
     };
-
-    let Some(alias) = alias else {
-        return Ok(input.trim().to_owned());
-    };
-
-    let choices = available_versions(GamePlatform::Java).await?;
-    let choice = choices.iter()
-        .find(|choice| choice.id == alias)
-        .ok_or_else(|| "Не удалось определить последнюю версию Minecraft для установки OfflineSkins.".to_owned())?;
-    choice.label
-        .split('·')
-        .nth(1)
-        .map(str::trim)
-        .filter(|version| !version.is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| "Mojang не вернул точный номер версии Minecraft.".to_owned())
-}
-
-/// Installs the client-only OfflineSkins Fabric mod and the selected texture into
-/// this isolated instance. Modrinth's version metadata is used for compatibility
-/// matching and its SHA-512 is verified before the JAR is placed in the mods folder.
-async fn install_offline_skins_mod(
-    game_dir: &Path,
-    game_version: &str,
-    player_name: &str,
-    skin_path: &Path,
-    model: SkinModel,
-) -> Result<(), String> {
-    if !(3..=16).contains(&player_name.len())
-        || !player_name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-    {
-        return Err("OfflineSkins требует игровой ник из 3–16 латинских букв, цифр или _.".to_owned());
+    if is_valid {
+        return Ok(target);
     }
-
-    let mut versions_url = reqwest::Url::parse(
-        "https://api.modrinth.com/v2/project/dUHrybXD/version",
-    ).map_err(|error| format!("Некорректный адрес каталога OfflineSkins: {error}"))?;
-    versions_url.query_pairs_mut()
-        .append_pair("loaders", r#"["fabric"]"#)
-        .append_pair("game_versions", &serde_json::to_string(&[game_version])
-            .map_err(|error| error.to_string())?);
 
     let client = reqwest::Client::builder()
         .user_agent("GlowstoneCL/0.1.0 (https://github.com/q933598-ai/GlowstoneCL)")
         .build()
         .map_err(|error| error.to_string())?;
-    let versions = client
-        .get(versions_url)
+    let url = reqwest::Url::parse(OFFLINE_SKIN_INJECTOR_URL)
+        .map_err(|error| format!("Некорректный адрес OfflineSkinInjector: {error}"))?;
+    if url.scheme() != "https" || url.host_str() != Some("github.com") {
+        return Err("Загрузка OfflineSkinInjector остановлена: недоверенный адрес.".to_owned());
+    }
+
+    let bytes = client
+        .get(url)
         .send()
         .await
-        .map_err(|error| format!("Не удалось получить совместимые версии OfflineSkins: {error}"))?
+        .map_err(|error| format!("Не удалось загрузить OfflineSkinInjector: {error}"))?
         .error_for_status()
-        .map_err(|error| format!("Modrinth не вернул список OfflineSkins: {error}"))?
-        .json::<Vec<ModrinthSkinVersion>>()
+        .map_err(|error| format!("GitHub не отдал OfflineSkinInjector: {error}"))?
+        .bytes()
         .await
-        .map_err(|error| format!("Modrinth вернул некорректный список OfflineSkins: {error}"))?;
-
-    let compatible = versions.into_iter().find(|version| {
-        version.game_versions.iter().any(|supported| supported == game_version)
-            && version.loaders.iter().any(|loader| loader == "fabric")
-            && !version.files.is_empty()
-    }).ok_or_else(|| format!(
-        "Для Minecraft {game_version} пока нет подтверждённой версии OfflineSkins для Fabric. Поддерживаются версии, перечисленные в каталоге OfflineSkins на Modrinth."
-    ))?;
-
-    let file = compatible.files.iter()
-        .find(|file| file.primary && file.filename.to_ascii_lowercase().ends_with(".jar"))
-        .or_else(|| compatible.files.iter().find(|file| file.filename.to_ascii_lowercase().ends_with(".jar")))
-        .ok_or_else(|| format!("В релизе OfflineSkins {} не найден JAR-файл.", compatible.version_number))?;
-
-    let file_url = reqwest::Url::parse(&file.url)
-        .map_err(|error| format!("Modrinth вернул некорректный URL OfflineSkins: {error}"))?;
-    if file_url.scheme() != "https" || file_url.host_str() != Some("cdn.modrinth.com") {
-        return Err("Загрузка OfflineSkins остановлена: Modrinth вернул недоверенный адрес файла.".to_owned());
+        .map_err(|error| format!("Не удалось прочитать OfflineSkinInjector: {error}"))?;
+    if bytes.len() != OFFLINE_SKIN_INJECTOR_SIZE {
+        return Err(format!(
+            "Размер OfflineSkinInjector не совпадает с релизом: ожидалось {} байт, получено {}.",
+            OFFLINE_SKIN_INJECTOR_SIZE,
+            bytes.len()
+        ));
     }
-    if file.size == 0 || file.size > 20 * 1024 * 1024 {
-        return Err("Размер JAR OfflineSkins выходит за допустимый предел 20 МБ.".to_owned());
+    let actual = digest_hex(sha2::Sha256::digest(&bytes).as_slice());
+    if actual != OFFLINE_SKIN_INJECTOR_SHA256 {
+        return Err("SHA-256 OfflineSkinInjector не совпадает с закреплённым релизом. JAR не будет запущен.".to_owned());
     }
 
+    let temporary = target.with_extension("jar.tmp");
+    tokio::fs::write(&temporary, &bytes)
+        .await
+        .map_err(|error| format!("Не удалось сохранить OfflineSkinInjector: {error}"))?;
+    if target.exists() {
+        tokio::fs::remove_file(&target)
+            .await
+            .map_err(|error| format!("Не удалось заменить старый OfflineSkinInjector: {error}"))?;
+    }
+    tokio::fs::rename(&temporary, &target)
+        .await
+        .map_err(|error| format!("Не удалось завершить установку OfflineSkinInjector: {error}"))?;
+    Ok(target)
+}
+
+/// Removes only the old mod JARs GlowstoneCL itself created in earlier builds.
+/// User-installed mods and all other files are left untouched.
+fn remove_legacy_glowstone_offlineskins_mods(game_dir: &Path) {
     let mods_dir = game_dir.join("mods");
-    tokio::fs::create_dir_all(&mods_dir)
-        .await
-        .map_err(|error| format!("Не удалось создать папку mods: {error}"))?;
-    let safe_version: String = game_version.chars()
-        .map(|character| if character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_') {
-            character
-        } else {
-            '_'
-        })
-        .collect();
-    let mod_path = mods_dir.join(format!("glowstone-offlineskins-{safe_version}.jar"));
-
-    let need_download = match tokio::fs::read(&mod_path).await {
-        Ok(existing) => {
-            let expected = file.hashes.sha512.as_deref()
-                .ok_or_else(|| "Modrinth не прислал SHA-512 для OfflineSkins.".to_owned())?;
-            digest_hex(sha2::Sha512::digest(&existing).as_slice()) != expected
-        }
-        Err(_) => true,
+    let Ok(entries) = fs::read_dir(mods_dir) else {
+        return;
     };
-
-    if need_download {
-        let bytes = client
-            .get(file_url)
-            .send()
-            .await
-            .map_err(|error| format!("Не удалось скачать OfflineSkins: {error}"))?
-            .error_for_status()
-            .map_err(|error| format!("Ошибка загрузки OfflineSkins: {error}"))?
-            .bytes()
-            .await
-            .map_err(|error| format!("Не удалось прочитать OfflineSkins: {error}"))?;
-        if bytes.len() as u64 != file.size {
-            return Err("Размер скачанного OfflineSkins не совпадает с метаданными Modrinth.".to_owned());
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let managed_name = path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                name.starts_with("glowstone-offlineskins-")
+                    && name.to_ascii_lowercase().ends_with(".jar")
+            });
+        if managed_name {
+            if let Err(error) = fs::remove_file(&path) {
+                eprintln!(
+                    "[GlowstoneCL] Не удалось удалить старый автоматически установленный OfflineSkins {}: {error}",
+                    path.display()
+                );
+            }
         }
-        let expected = file.hashes.sha512.as_deref()
-            .ok_or_else(|| "Modrinth не прислал SHA-512 для OfflineSkins.".to_owned())?;
-        let actual = digest_hex(sha2::Sha512::digest(&bytes).as_slice());
-        if actual != expected {
-            return Err("SHA-512 OfflineSkins не совпадает с контрольной суммой Modrinth.".to_owned());
-        }
-
-        let temporary = mod_path.with_extension("jar.tmp");
-        tokio::fs::write(&temporary, &bytes)
-            .await
-            .map_err(|error| format!("Не удалось сохранить OfflineSkins: {error}"))?;
-        if mod_path.exists() {
-            tokio::fs::remove_file(&mod_path)
-                .await
-                .map_err(|error| format!("Не удалось заменить OfflineSkins: {error}"))?;
-        }
-        tokio::fs::rename(&temporary, &mod_path)
-            .await
-            .map_err(|error| format!("Не удалось завершить установку OfflineSkins: {error}"))?;
     }
+}
 
-    let skins_dir = game_dir.join("config").join("offlineskins");
-    tokio::fs::create_dir_all(&skins_dir)
-        .await
-        .map_err(|error| format!("Не удалось создать каталог config/offlineskins: {error}"))?;
-    let skin_bytes = tokio::fs::read(skin_path)
-        .await
-        .map_err(|error| format!("Не удалось прочитать выбранный offline-скин: {error}"))?;
-    // OfflineSkins resolves the file by the offline GameProfile name.
-    // Preserve its exact casing instead of normalizing it to lowercase.
-    tokio::fs::write(skins_dir.join(format!("{player_name}.png")), &skin_bytes)
-        .await
-        .map_err(|error| format!("Не удалось записать PNG в config/offlineskins: {error}"))?;
-    let config = serde_json::json!({
-        "selectedSkinName": player_name,
-        "defaultModel": match model {
-            SkinModel::Classic => "steve",
-            SkinModel::Slim => "alex",
-        }
-    });
-    tokio::fs::write(
-        skins_dir.join("config.json"),
-        serde_json::to_vec_pretty(&config).map_err(|error| error.to_string())?,
-    )
-    .await
-    .map_err(|error| format!("Не удалось сохранить настройки OfflineSkins: {error}"))?;
-
-    Ok(())
+/// JVM arguments for the agent. Each value remains a separate process argument,
+/// so paths containing spaces do not need shell quoting on Windows or Linux.
+fn offline_skin_jvm_args(
+    agent_path: &Path,
+    skin_path: &Path,
+    model: SkinModel,
+    account: &GameAccount,
+) -> Vec<String> {
+    let model = match model {
+        SkinModel::Classic => "classic",
+        SkinModel::Slim => "slim",
+    };
+    vec![
+        format!("-javaagent:{}", agent_path.display()),
+        format!("-Dofflineskininjector.skin={}", skin_path.display()),
+        "-Dofflineskininjector.mode=self".to_owned(),
+        format!("-Dofflineskininjector.model={model}"),
+        format!("-Dofflineskininjector.uuid={}", account.uuid),
+        format!("-Dofflineskininjector.name={}", account.name),
+    ]
 }
 
 async fn launch_java(
@@ -658,56 +585,40 @@ async fn launch_java(
     account: GameAccount,
     offline_skin: Option<(PathBuf, SkinModel)>,
 ) -> Result<LaunchOutcome, String> {
-    let mut version = java_version_selector(&instance.game_version);
-    let mut install_fabric_for_skin = false;
+    let version = java_version_selector(&instance.game_version);
     let mut skin_notice = None;
+    let mut options = JavaLaunchOptions::new(data_root.clone(), version);
 
     if let Some((skin_path, model)) = offline_skin.as_ref() {
-        if matches!(instance.loader, LoaderKind::Vanilla | LoaderKind::Fabric) {
-            match resolve_java_skin_version(&instance.game_version).await {
-                Ok(resolved) => {
-                    let game_dir = store::instance_directory(&instance.id.0)?;
-                    match install_offline_skins_mod(&game_dir, &resolved, &account.name, skin_path, *model).await {
-                        Ok(()) => {
-                            version = resolved;
-                            install_fabric_for_skin = instance.loader == LoaderKind::Vanilla;
-                        }
-                        Err(error) => {
-                            skin_notice = Some(format!(
-                                "Offline-скин не применён к Minecraft {resolved}: {error} Игра запущена без локального скина."
-                            ));
-                            eprintln!("[GlowstoneCL] {}", skin_notice.as_deref().unwrap_or_default());
-                        }
-                    }
-                }
-                Err(error) => {
-                    skin_notice = Some(format!(
-                        "Не удалось определить совместимую версию для OfflineSkins: {error} Игра запущена без локального скина."
-                    ));
-                    eprintln!("[GlowstoneCL] {}", skin_notice.as_deref().unwrap_or_default());
-                }
+        match ensure_offline_skin_injector(&data_root).await {
+            Ok(agent_path) => {
+                let game_dir = store::instance_directory(&instance.id.0)?;
+                remove_legacy_glowstone_offlineskins_mods(&game_dir);
+                options.jvm_args.extend(offline_skin_jvm_args(
+                    &agent_path,
+                    skin_path,
+                    *model,
+                    &account,
+                ));
+                eprintln!(
+                    "[GlowstoneCL] Offline skin enabled without a Minecraft mod (OfflineSkinInjector {OFFLINE_SKIN_INJECTOR_VERSION})."
+                );
             }
-        } else {
-            skin_notice = Some(format!(
-                "Локальные скины Java сейчас подключаются через Fabric. Выбран загрузчик {:?}; игра запущена с ним без автоматического применения скина.",
-                instance.loader
-            ));
-            eprintln!("[GlowstoneCL] {}", skin_notice.as_deref().unwrap_or_default());
+            Err(error) => {
+                skin_notice = Some(format!(
+                    "Не удалось подготовить OfflineSkinInjector: {error} Игра запущена без локального скина."
+                ));
+                eprintln!("[GlowstoneCL] {}", skin_notice.as_deref().unwrap_or_default());
+            }
         }
     }
-    let mut options = JavaLaunchOptions::new(data_root, version);
     options.instance = Some(instance.id.0.clone());
     options.loader.path = format!("instances/{}/loader", instance.id.0);
     options.download_concurrency = 10;
     options.memory.max = "4G".to_owned();
 
     match instance.loader {
-        LoaderKind::Vanilla => {
-            if install_fabric_for_skin {
-                options.loader.kind = Some(JavaLoaderKind::Fabric);
-                options.loader.enable = true;
-            }
-        }
+        LoaderKind::Vanilla => {}
         LoaderKind::Forge => {
             options.loader.kind = Some(JavaLoaderKind::Forge);
             options.loader.enable = true;
