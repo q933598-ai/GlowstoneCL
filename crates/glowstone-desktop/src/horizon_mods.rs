@@ -215,7 +215,7 @@ fn validate_content_manifest(manifest: &str, expected_id: &str, expected_version
     if !manifest_has_registry_capability(manifest) {
         return Err("В horizon-mod.toml отсутствует capability registries.".to_owned());
     }
-    if manifest.contains("[native]") || manifest.contains("[wasm]") {
+    if manifest.lines().any(|line| matches!(line.trim(), "[native]" | "[wasm]")) {
         return Err("Этот .hmod содержит нативную или WebAssembly секцию и не входит в поддерживаемый content-only режим GlowstoneCL.".to_owned());
     }
     Ok(())
@@ -601,4 +601,58 @@ fn hex(bytes: &[u8]) -> String {
         output.push(DIGITS[(byte & 0x0f) as usize] as char);
     }
     output
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const VALID: &str = r#"
+id = "coords_hud"
+name = "Coordinates HUD"
+version = "0.1.0"
+api = "0.2"
+side = "client"
+capabilities = ["registries"]
+"#;
+
+    #[test]
+    fn content_manifest_must_match_registry_identity_and_version() {
+        assert!(validate_content_manifest(VALID, "coords_hud", "0.1.0").is_ok());
+        assert!(validate_content_manifest(VALID, "another_mod", "0.1.0").is_err());
+        assert!(validate_content_manifest(VALID, "coords_hud", "0.2.0").is_err());
+    }
+
+    #[test]
+    fn content_manifest_requires_registry_capability_and_api() {
+        let missing = VALID.replace("capabilities = [\\"registries\\"]", "capabilities = []");
+        assert!(validate_content_manifest(&missing, "coords_hud", "0.1.0").is_err());
+        let wrong_api = VALID.replace("api = \\"0.2\\"", "api = \\"0.3\\"");
+        assert!(validate_content_manifest(&wrong_api, "coords_hud", "0.1.0").is_err());
+    }
+
+    #[test]
+    fn content_installer_refuses_native_or_wasm_manifest_tables() {
+        let native = format!("{VALID}\\n[native]\\ngame = \\"26.3\\"");
+        assert!(validate_content_manifest(&native, "coords_hud", "0.1.0").is_err());
+        let wasm = format!("{VALID}\\n[wasm]\\nentry = \\"mod.wasm\\"");
+        assert!(validate_content_manifest(&wasm, "coords_hud", "0.1.0").is_err());
+    }
+
+    #[test]
+    fn github_asset_urls_must_have_expected_release_shape_and_filename() {
+        assert!(file_url_is_registry_release(
+            "https://github.com/horizon-rust/horizon-mods/releases/download/coords_hud-0.1.0/coords_hud-0.1.0.hmod",
+            "coords_hud-0.1.0.hmod",
+        ));
+        assert!(!file_url_is_registry_release(
+            "http://github.com/horizon-rust/horizon-mods/releases/download/coords_hud-0.1.0/coords_hud-0.1.0.hmod",
+            "coords_hud-0.1.0.hmod",
+        ));
+        assert!(!file_url_is_registry_release(
+            "https://example.com/coords_hud-0.1.0.hmod",
+            "coords_hud-0.1.0.hmod",
+        ));
+    }
 }
