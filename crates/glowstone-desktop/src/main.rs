@@ -2,6 +2,7 @@
 
 mod auth;
 mod game;
+mod mods;
 mod store;
 mod skin_preview;
 mod ui;
