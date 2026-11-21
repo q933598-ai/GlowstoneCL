@@ -9,6 +9,7 @@ use glowstone_core::{GameInstance, GamePlatform, InstanceState, LoaderKind};
 
 use crate::auth::{self, DeviceCodePrompt, PollResult};
 use crate::game::{self, LaunchOutcome};
+use crate::horizon_mods;
 use crate::mods;
 use crate::store::{self, AccountKind, AccountProfile, PersistedState};
 
@@ -72,10 +73,15 @@ pub enum Message {
     VersionCatalogLoaded(GamePlatform, Result<Vec<game::VersionChoice>, String>),
     SearchMods,
     ModTargetSelected(String),
+    OpenInstanceMods(String),
     ModsSearched(String, Result<Vec<mods::ModProject>, String>),
     InstallMod(String),
     ModInstallFinished(String, Result<Vec<mods::InstalledMod>, String>),
     RemoveMod(String, String),
+    HorizonModsSearched(String, Result<Vec<horizon_mods::HorizonModProject>, String>),
+    InstallHorizonMod(String),
+    HorizonModInstallFinished(String, Result<Vec<horizon_mods::InstalledHorizonMod>, String>),
+    RemoveHorizonMod(String, String),
     CreateInstance,
     SelectInstance(String),
     LaunchInstance(String),
@@ -135,6 +141,8 @@ pub struct App {
     mod_target_instance: Option<String>,
     mod_results: Vec<mods::ModProject>,
     installed_mods: Vec<mods::InstalledMod>,
+    horizon_mod_results: Vec<horizon_mods::HorizonModProject>,
+    horizon_installed_mods: Vec<horizon_mods::InstalledHorizonMod>,
     mods_busy: bool,
     mods_busy_project: Option<String>,
     mods_error: Option<String>,
@@ -184,6 +192,8 @@ impl Default for App {
             mod_target_instance: None,
             mod_results: Vec::new(),
             installed_mods: Vec::new(),
+            horizon_mod_results: Vec::new(),
+            horizon_installed_mods: Vec::new(),
             mods_busy: false,
             mods_busy_project: None,
             mods_error: None,
