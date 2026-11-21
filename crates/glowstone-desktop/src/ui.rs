@@ -80,6 +80,7 @@ pub enum Message {
     DeleteAccount(String),
     SelectWardrobeAccount(String),
     SkinNameChanged(String),
+    RenameNameChanged(String),
     SkinModelChanged(store::SkinModel),
     PickSkinFile,
     SkinFilePicked {
@@ -130,6 +131,7 @@ pub struct App {
     wardrobe_active_skin_id: Option<String>,
     wardrobe_selected_skin_id: Option<String>,
     skin_name: String,
+    rename_skin_name: String,
     skin_model: store::SkinModel,
 }
 
@@ -173,6 +175,7 @@ impl Default for App {
             wardrobe_active_skin_id: wardrobe_collection.active_skin_id,
             wardrobe_selected_skin_id,
             skin_name: String::new(),
+            rename_skin_name: String::new(),
             skin_model: store::SkinModel::Classic,
             data,
         }
@@ -428,6 +431,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             }
         }
         Message::SkinNameChanged(value) => app.skin_name = value,
+        Message::RenameNameChanged(value) => app.rename_skin_name = value,
         Message::SkinModelChanged(model) => app.skin_model = model,
         Message::PickSkinFile => {
             let Some(account_id) = app.wardrobe_account_id.as_deref() else {
@@ -489,6 +493,10 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                                 app.wardrobe_skins = collection.skins;
                                 app.wardrobe_active_skin_id = active_skin_id;
                                 app.wardrobe_selected_skin_id = last_skin_id;
+                                app.rename_skin_name = app.wardrobe_selected_skin_id.as_ref()
+                                    .and_then(|id| app.wardrobe_skins.iter().find(|skin| &skin.id == id))
+                                    .map(|skin| skin.name.clone())
+                                    .unwrap_or_default();
                                 app.skin_name.clear();
                             }
                             app.notice = Some(format!("Скин «{name}» добавлен в локальный гардероб."));
@@ -503,7 +511,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         Message::SelectSkin(id) => {
             if let Some(skin) = app.wardrobe_skins.iter().find(|skin| skin.id == id) {
                 app.wardrobe_selected_skin_id = Some(id);
-                app.skin_name = skin.name.clone();
+                app.rename_skin_name = skin.name.clone();
             }
         }
         Message::ActivateSkin(id) => {
@@ -512,7 +520,11 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     Ok(collection) => {
                         app.wardrobe_skins = collection.skins;
                         app.wardrobe_active_skin_id = collection.active_skin_id;
-                        app.wardrobe_selected_skin_id = Some(id);
+                        app.wardrobe_selected_skin_id = Some(id.clone());
+                        app.rename_skin_name = app.wardrobe_skins.iter()
+                            .find(|skin| skin.id == id)
+                            .map(|skin| skin.name.clone())
+                            .unwrap_or_default();
                         app.notice = Some("Активный скин сохранён для этого offline-аккаунта.".into());
                     }
                     Err(error) => app.notice = Some(error),
@@ -522,7 +534,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         Message::RenameSelectedSkin => {
             let selected_id = app.wardrobe_selected_skin_id.clone();
             if let (Some(account), Some(skin_id)) = (wardrobe_account(app), selected_id) {
-                match store::rename_skin(&account.uuid, &skin_id, &app.skin_name) {
+                match store::rename_skin(&account.uuid, &skin_id, &app.rename_skin_name) {
                     Ok(collection) => {
                         app.wardrobe_skins = collection.skins;
                         app.wardrobe_active_skin_id = collection.active_skin_id;
@@ -555,7 +567,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                         app.wardrobe_active_skin_id = collection.active_skin_id;
                         if app.wardrobe_selected_skin_id.as_deref() == Some(id.as_str()) {
                             app.wardrobe_selected_skin_id = next_selected;
-                            app.skin_name.clear();
+                            app.rename_skin_name.clear();
                         }
                         app.notice = Some("Скин удалён из локального гардероба.".into());
                     }
@@ -1836,6 +1848,7 @@ fn refresh_wardrobe(app: &mut App) {
         app.wardrobe_skins.clear();
         app.wardrobe_active_skin_id = None;
         app.wardrobe_selected_skin_id = None;
+        app.rename_skin_name.clear();
         return;
     };
     match store::load_skin_collection(&account.uuid) {
@@ -1848,6 +1861,10 @@ fn refresh_wardrobe(app: &mut App) {
                 app.wardrobe_selected_skin_id = app.wardrobe_active_skin_id.clone()
                     .or_else(|| app.wardrobe_skins.first().map(|skin| skin.id.clone()));
             }
+            app.rename_skin_name = app.wardrobe_selected_skin_id.as_ref()
+                .and_then(|id| app.wardrobe_skins.iter().find(|skin| &skin.id == id))
+                .map(|skin| skin.name.clone())
+                .unwrap_or_default();
         }
         Err(error) => app.notice = Some(error),
     }
@@ -2090,8 +2107,8 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
         account_picker,
         import_panel,
         active_preview,
-        text_input("Новое название для выбранного скина", &app.skin_name)
-            .on_input(Message::SkinNameChanged)
+        text_input("Новое название для выбранного скина", &app.rename_skin_name)
+            .on_input(Message::RenameNameChanged)
             .padding(9)
             .size(10),
         skin_list,
