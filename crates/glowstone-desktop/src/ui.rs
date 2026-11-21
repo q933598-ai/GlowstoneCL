@@ -480,13 +480,15 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     };
                     match store::import_skin(&account_uuid, name, &bytes, model) {
                         Ok(collection) => {
+                            let last_skin_id = collection.skins.last().map(|skin| skin.id.clone());
+                            let active_skin_id = collection.active_skin_id.clone();
                             let is_current = app.wardrobe_account_id.as_ref()
                                 .and_then(|id| app.data.accounts.iter().find(|account| &account.id == id))
                                 .is_some_and(|account| account.uuid == account_uuid);
                             if is_current {
                                 app.wardrobe_skins = collection.skins;
-                                app.wardrobe_active_skin_id = collection.active_skin_id.clone();
-                                app.wardrobe_selected_skin_id = collection.skins.last().map(|skin| skin.id.clone());
+                                app.wardrobe_active_skin_id = active_skin_id;
+                                app.wardrobe_selected_skin_id = last_skin_id;
                                 app.skin_name.clear();
                             }
                             app.notice = Some(format!("Скин «{name}» добавлен в локальный гардероб."));
@@ -547,11 +549,12 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             if let Some(account) = wardrobe_account(app) {
                 match store::delete_skin(&account.uuid, &id) {
                     Ok(collection) => {
+                        let next_selected = collection.active_skin_id.clone()
+                            .or_else(|| collection.skins.first().map(|skin| skin.id.clone()));
                         app.wardrobe_skins = collection.skins;
-                        app.wardrobe_active_skin_id = collection.active_skin_id.clone();
+                        app.wardrobe_active_skin_id = collection.active_skin_id;
                         if app.wardrobe_selected_skin_id.as_deref() == Some(id.as_str()) {
-                            app.wardrobe_selected_skin_id = collection.active_skin_id
-                                .or_else(|| collection.skins.first().map(|skin| skin.id.clone()));
+                            app.wardrobe_selected_skin_id = next_selected;
                             app.skin_name.clear();
                         }
                         app.notice = Some("Скин удалён из локального гардероба.".into());
@@ -2415,11 +2418,14 @@ fn downloads_page() -> Element<'static, Message> {
     .into()
 }
 
-fn section_header(title: &'static str, subtitle: &'static str) -> Element<'static, Message> {
+fn section_header(
+    title: impl Into<String>,
+    subtitle: impl Into<String>,
+) -> Element<'static, Message> {
     row![
         column![
-            text(title).size(9).color(CYAN),
-            text(subtitle).size(11).color(MUTED),
+            text(title.into()).size(9).color(CYAN),
+            text(subtitle.into()).size(11).color(MUTED),
         ]
         .spacing(3),
         Space::new().width(Length::Fill),
