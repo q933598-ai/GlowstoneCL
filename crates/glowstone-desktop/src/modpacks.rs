@@ -4,7 +4,7 @@ use std::net::IpAddr;
 use std::path::{Component, Path, PathBuf};
 
 use glowstone_core::{GamePlatform, GameInstance, LoaderKind};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use sha1::Sha1;
 use sha2::{Digest as _, Sha256, Sha512};
@@ -46,13 +46,6 @@ struct ProjectVersion {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct VersionDependency {
-    project_id: Option<String>,
-    version_id: Option<String>,
-    dependency_type: String,
-    version: Option<String>,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 struct VersionFile {
     filename: String,
@@ -172,23 +165,32 @@ fn selected_version_dependency(version: &ProjectVersion) -> Result<(String, Load
     Ok((minecraft, loader))
 }
 
+fn hex_digest(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(output, "{byte:02x}");
+    }
+    output
+}
+
 fn verify_hashes(bytes: &[u8], hashes: &Value) -> Result<(), String> {
     if let Some(expected) = hashes["sha512"].as_str() {
-        let actual = format!("{:x}", Sha512::digest(bytes));
+        let actual = hex_digest(&Sha512::digest(bytes));
         if actual.eq_ignore_ascii_case(expected) {
             return Ok(());
         }
         return Err("SHA-512 файла из модпака не совпадает.".to_owned());
     }
     if let Some(expected) = hashes["sha256"].as_str() {
-        let actual = format!("{:x}", Sha256::digest(bytes));
+        let actual = hex_digest(&Sha256::digest(bytes));
         if actual.eq_ignore_ascii_case(expected) {
             return Ok(());
         }
         return Err("SHA-256 файла из модпака не совпадает.".to_owned());
     }
     if let Some(expected) = hashes["sha1"].as_str() {
-        let actual = format!("{:x}", Sha1::digest(bytes));
+        let actual = hex_digest(&Sha1::digest(bytes));
         if actual.eq_ignore_ascii_case(expected) {
             return Ok(());
         }
@@ -200,7 +202,7 @@ fn verify_hashes(bytes: &[u8], hashes: &Value) -> Result<(), String> {
 async fn download_mrpack(
     http: &reqwest::Client,
     project_id: &str,
-) -> Result<(Vec<u8>, String, String, String, LoaderKind), String> {
+) -> Result<(Vec<u8>, String, String, LoaderKind), String> {
     let versions_url = format!("{API}/project/{project_id}/version");
     let response = http.get(versions_url).send().await
         .map_err(|error| format!("Не удалось получить версии модпака: {error}"))?
@@ -236,7 +238,6 @@ async fn download_mrpack(
     Ok((
         bytes.to_vec(),
         minecraft,
-        loader.to_string(),
         version.name,
         loader,
     ))
@@ -382,7 +383,7 @@ async fn install_index_files(
 /// partially-created instance to the existing local trash mechanism.
 pub async fn install_project(project_id: String, project_name: String) -> Result<GameInstance, String> {
     let http = http_client()?;
-    let (bytes, minecraft, _loader_version, version_name, loader) =
+    let (bytes, minecraft, version_name, loader) =
         download_mrpack(&http, &project_id).await?;
     let instance_name = {
         let base = if project_name.trim().is_empty() { "Modpack" } else { project_name.trim() };
