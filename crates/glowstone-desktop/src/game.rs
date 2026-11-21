@@ -254,6 +254,8 @@ pub async fn launch_instance(
     account: AccountProfile,
     microsoft_client_id: String,
 ) -> Result<LaunchOutcome, String> {
+    instance.validate()
+        .map_err(|error| format!("Параметры сборки некорректны: {error}"))?;
     let data_root = store::app_data_dir()?;
     let instance_dir = store::instance_directory(&instance.id.0)?;
     fs::create_dir_all(&instance_dir)
