@@ -833,7 +833,7 @@ fn quick_item(
     .into()
 }
 
-fn secondary_page(_app: &App) -> Element<'_, Message> {
+fn secondary_page(app: &App) -> Element<'_, Message> {
     let (title, subtitle, empty, action) = match app.page {
         Page::Instances => (
             "Мои сборки",
