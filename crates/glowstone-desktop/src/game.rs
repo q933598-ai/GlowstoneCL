@@ -518,7 +518,7 @@ async fn install_offline_skins_mod(
     if !(3..=16).contains(&player_name.len())
         || !player_name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
     {
-        return Err("OfflineSkins требует игровой ник из 3–16 латинских букв, цифр или _. ".trim().to_owned());
+        return Err("OfflineSkins требует игровой ник из 3–16 латинских букв, цифр или _.".to_owned());
     }
 
     let mut versions_url = reqwest::Url::parse(
@@ -583,7 +583,7 @@ async fn install_offline_skins_mod(
         Ok(existing) => {
             let expected = file.hashes.sha512.as_deref()
                 .ok_or_else(|| "Modrinth не прислал SHA-512 для OfflineSkins.".to_owned())?;
-            format!("{:x}", sha2::Sha512::digest(&existing)) != expected
+            digest_hex(sha2::Sha512::digest(&existing)) != expected
         }
         Err(_) => true,
     };
@@ -604,7 +604,7 @@ async fn install_offline_skins_mod(
         }
         let expected = file.hashes.sha512.as_deref()
             .ok_or_else(|| "Modrinth не прислал SHA-512 для OfflineSkins.".to_owned())?;
-        let actual = format!("{:x}", sha2::Sha512::digest(&bytes));
+        let actual = digest_hex(sha2::Sha512::digest(&bytes));
         if actual != expected {
             return Err("SHA-512 OfflineSkins не совпадает с контрольной суммой Modrinth.".to_owned());
         }
