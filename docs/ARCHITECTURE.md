@@ -83,8 +83,12 @@ The desktop crate currently contains the runtime integrations:
 
 - `auth.rs` — Microsoft browser Device Code Flow through CrustCore, profile checks and CrustCore account construction;
 - `game.rs` — CrustCore Java installer/launcher, signed official Horizon release selection, and separate Horizon Offline fork integration;
-- `store.rs` — instance metadata, per-instance workspaces and OS credential storage;
-- `ui.rs` — desktop controls that call the asynchronous authentication and launch operations.
+- `store.rs` — instance metadata, per-instance workspaces, OS credential storage, and per-offline-UUID skin collections;
+- `ui.rs` — desktop controls for authentication, launching, and the local offline-skin wardrobe.
+
+## Local offline-skin wardrobe
+
+Skin files are stored under `skins/<offline-uuid>/` in the GlowstoneCL data directory, with a per-profile `skins.json` collection. Import validates PNG decoding, a 2 MiB file limit, and Minecraft skin dimensions (64×64 or legacy 64×32). The launcher supports local selection, rename, deletion, and a 2D texture-atlas preview. The selected texture is not currently injected into the Minecraft client; in-game rendering and a 3D player preview remain separate future work. Microsoft profiles are not modified.
 
 The following integrations remain future work:
 
