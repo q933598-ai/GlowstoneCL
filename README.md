@@ -25,7 +25,7 @@ The `test/glowstonecl` branch includes:
 - Microsoft browser sign-in through CrustCore using the official Minecraft Launcher public client by default (optional custom Client ID), followed by Xbox Live, XSTS and Minecraft Services, including ownership / Game Pass checks;
 - Microsoft refresh-token storage in the operating system credential store, with session refresh before launching a game;
 - offline profiles for Java offline-mode play and the separate Horizon Offline fork;
-- a skin wardrobe for offline and Microsoft profiles, with per-profile PNG collections, current-skin sync for Microsoft accounts, official Minecraft Services upload, and a textured rotatable 3D player preview. Offline skins remain local and need a compatible client-side skin mod to appear in game.
+- a skin wardrobe for offline and Microsoft profiles, with per-profile PNG collections, current-skin sync for Microsoft accounts, official Minecraft Services upload, and a textured rotatable 3D player preview. Offline skins are applied directly by Horizon Offline; on Minecraft Java 1.21.6–1.21.11 and 26.1–26.3, GlowstoneCL installs the compatible Fabric OfflineSkins client mod and configures the local texture automatically. Vanilla Java profiles are switched to Fabric for this feature; other loaders and older versions are not yet supported.
 
 The Horizon game binary is currently provided for **Linux x86_64** and **Windows x64**. The Java backend supports the platform/runtime combinations provided by CrustCore.
 
