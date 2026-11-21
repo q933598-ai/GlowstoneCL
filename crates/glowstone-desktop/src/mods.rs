@@ -190,7 +190,7 @@ fn allowed_icon_url(source: &str, value: &str) -> Option<reqwest::Url> {
 }
 
 fn looks_like_image(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"\\x89PNG\\r\\n\\x1a\\n")
+    bytes.starts_with(b"\x89PNG\r\n\x1a\n")
         || bytes.starts_with(&[0xff, 0xd8, 0xff])
         || bytes.starts_with(b"GIF8")
         || (bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP")
