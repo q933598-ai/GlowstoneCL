@@ -1,5 +1,5 @@
 //! Horizon's reviewed content-mod registry and per-instance HMOD installation.
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 
 use glowstone_core::{GameInstance, GamePlatform};
@@ -178,6 +178,49 @@ fn valid_mod_id(id: &str) -> bool {
         && id.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
+fn manifest_string_field<'a>(manifest: &'a str, key: &str) -> Option<&'a str> {
+    manifest.lines().find_map(|line| {
+        let line = line.split('#').next()?.trim();
+        let (field, value) = line.split_once('=')?;
+        if field.trim() != key {
+            return None;
+        }
+        value.trim()
+            .strip_prefix('"')?
+            .strip_suffix('"')
+    })
+}
+
+fn manifest_has_registry_capability(manifest: &str) -> bool {
+    manifest.lines().any(|line| {
+        let line = line.split('#').next().unwrap_or("").trim();
+        let Some((field, value)) = line.split_once('=') else {
+            return false;
+        };
+        field.trim() == "capabilities"
+            && value.split('"').skip(1).step_by(2).any(|item| item == "registries")
+    })
+}
+
+fn validate_content_manifest(manifest: &str, expected_id: &str, expected_version: &str) -> Result<(), String> {
+    if manifest_string_field(manifest, "id") != Some(expected_id) {
+        return Err("ID в horizon-mod.toml не совпадает с ID проекта Horizon Registry.".to_owned());
+    }
+    if manifest_string_field(manifest, "version") != Some(expected_version) {
+        return Err("Версия в horizon-mod.toml не совпадает с версией Horizon Registry.".to_owned());
+    }
+    if manifest_string_field(manifest, "api") != Some("0.2") {
+        return Err("HMOD должен использовать content API 0.2.".to_owned());
+    }
+    if !manifest_has_registry_capability(manifest) {
+        return Err("В horizon-mod.toml отсутствует capability registries.".to_owned());
+    }
+    if manifest.contains("[native]") || manifest.contains("[wasm]") {
+        return Err("Этот .hmod содержит нативную или WebAssembly секцию и не входит в поддерживаемый content-only режим GlowstoneCL.".to_owned());
+    }
+    Ok(())
+}
+
 fn safe_file_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 180
@@ -220,7 +263,7 @@ fn compatible_version(project: &HorizonModProject) -> Option<HorizonModVersion> 
         .find(|version| {
             version.game == GAME_VERSION
                 && version.file.name.ends_with(".hmod")
-                && version.capabilities.iter().all(|capability| capability == "registries")
+                && version.capabilities.iter().any(|capability| capability == "registries")
         })
         .cloned()
 }
@@ -473,13 +516,19 @@ pub async fn install(instance: GameInstance, project_id: String) -> Result<Vec<I
     if checksum != version.file.sha256.to_ascii_lowercase() {
         return Err("SHA-256 HMOD не совпадает с проверенным индексом Horizon. Файл не установлен.".to_owned());
     }
-    // Confirm that the reviewed package is a ZIP containing its root manifest.
+    // Confirm that the reviewed package is a ZIP containing the matching content manifest.
     let cursor = Cursor::new(bytes.as_ref());
     let mut archive = zip::ZipArchive::new(cursor)
         .map_err(|error| format!("HMOD не является корректным ZIP-пакетом: {error}"))?;
-    if archive.by_name("horizon-mod.toml").is_err() {
-        return Err("В HMOD отсутствует корневой horizon-mod.toml.".to_owned());
+    let mut manifest_file = archive.by_name("horizon-mod.toml")
+        .map_err(|_| "В HMOD отсутствует корневой horizon-mod.toml.".to_owned())?;
+    if manifest_file.size() > 64 * 1024 {
+        return Err("Манифест HMOD превышает 64 КиБ.".to_owned());
     }
+    let mut manifest_text = String::new();
+    manifest_file.read_to_string(&mut manifest_text)
+        .map_err(|error| format!("Манифест HMOD повреждён: {error}"))?;
+    validate_content_manifest(&manifest_text, &project.id, &version.version)?;
 
     let temporary = directory.join(format!(".{target_name}.part"));
     tokio::fs::write(&temporary, &bytes).await
