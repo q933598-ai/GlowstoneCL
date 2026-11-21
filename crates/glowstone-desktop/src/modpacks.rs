@@ -39,7 +39,9 @@ struct ProjectVersion {
     #[serde(default)]
     version_type: String,
     #[serde(default)]
-    dependencies: Vec<VersionDependency>,
+    game_versions: Vec<String>,
+    #[serde(default)]
+    loaders: Vec<String>,
     files: Vec<VersionFile>,
 }
 
@@ -153,31 +155,20 @@ fn public_https_url(raw: &str) -> Result<reqwest::Url, String> {
     Ok(url)
 }
 
-fn loader_from_dependencies(dependencies: &Value) -> Result<(String, LoaderKind), String> {
-    if let Some(version) = dependencies["fabric-loader"].as_str() {
-        return Ok((version.to_owned(), LoaderKind::Fabric));
-    }
-    if let Some(version) = dependencies["neoforge"].as_str() {
-        return Ok((version.to_owned(), LoaderKind::NeoForge));
-    }
-    if let Some(version) = dependencies["forge"].as_str() {
-        return Ok((version.to_owned(), LoaderKind::Forge));
-    }
-    if let Some(version) = dependencies["quilt-loader"].as_str() {
-        return Ok((version.to_owned(), LoaderKind::Quilt));
-    }
-    Err("Этот модпак не содержит поддерживаемый загрузчик Fabric, Forge, NeoForge или Quilt.".to_owned())
-}
-
 fn selected_version_dependency(version: &ProjectVersion) -> Result<(String, LoaderKind), String> {
-    let dependencies = serde_json::to_value(&version.dependencies)
-        .map_err(|error| error.to_string())?;
-    let minecraft = version.dependencies.iter()
-        .find(|dependency| dependency.project_id.as_deref() == Some("minecraft")
-            || dependency.version.as_deref().is_some_and(|version| version.starts_with("1.") || version.starts_with("26.")))
-        .and_then(|dependency| dependency.version.clone())
-        .ok_or_else(|| "В версии модпака отсутствует обязательная версия Minecraft.".to_owned())?;
-    let (loader_version, loader) = loader_from_dependencies(&dependencies)?;
+    let minecraft = version.game_versions.first().cloned()
+        .ok_or_else(|| "В версии модпака отсутствует список версий Minecraft.".to_owned())?;
+    let loader = if version.loaders.iter().any(|loader| loader == "fabric") {
+        LoaderKind::Fabric
+    } else if version.loaders.iter().any(|loader| loader == "neoforge") {
+        LoaderKind::NeoForge
+    } else if version.loaders.iter().any(|loader| loader == "forge") {
+        LoaderKind::Forge
+    } else if version.loaders.iter().any(|loader| loader == "quilt") {
+        LoaderKind::Quilt
+    } else {
+        return Err("Этот модпак не содержит поддерживаемый загрузчик Fabric, Forge, NeoForge или Quilt.".to_owned());
+    };
     Ok((minecraft, loader))
 }
 
