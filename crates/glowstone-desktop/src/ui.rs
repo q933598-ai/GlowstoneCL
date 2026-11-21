@@ -1285,6 +1285,7 @@ fn version_choices_view(app: &App) -> Element<'_, Message> {
         .take(14)
         .collect();
 
+    let has_matches = !matches.is_empty();
     let mut choices = column![].spacing(4);
     for choice in matches {
         let active = app.instance_version == choice.id;
@@ -1333,7 +1334,7 @@ fn version_choices_view(app: &App) -> Element<'_, Message> {
             .padding(8)
             .width(Length::Fill)
             .into()
-    } else if choices.as_column().children().is_empty() {
+    } else if !has_matches {
         container(text("Ничего не найдено. Попробуй другой запрос или введи ID вручную.")
             .size(9).color(MUTED))
             .padding(8)
