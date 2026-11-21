@@ -75,6 +75,7 @@ pub enum Message {
     ModTargetSelected(String),
     OpenInstanceMods(String),
     ModsSearched(String, Result<Vec<mods::ModProject>, String>),
+    InstalledModIconsLoaded(String, Result<Vec<mods::InstalledMod>, String>),
     InstallMod(String),
     ModInstallFinished(String, Result<Vec<mods::InstalledMod>, String>),
     RemoveMod(String, String),
@@ -388,11 +389,22 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     Ok(results) => {
                         app.mod_results = results;
                         app.mods_error = None;
+                        return iced::Task::perform(
+                            mods::refresh_installed_icons(target_id.clone()),
+                            move |result| Message::InstalledModIconsLoaded(target_id, result),
+                        );
                     }
                     Err(error) => {
                         app.mod_results.clear();
                         app.mods_error = Some(error);
                     }
+                }
+            }
+        }
+        Message::InstalledModIconsLoaded(target_id, result) => {
+            if app.mod_target_instance.as_deref() == Some(target_id.as_str()) {
+                if let Ok(installed) = result {
+                    app.installed_mods = installed;
                 }
             }
         }
