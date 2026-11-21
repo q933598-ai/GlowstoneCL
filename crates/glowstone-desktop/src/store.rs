@@ -157,7 +157,7 @@ pub fn installed_mod_count(instance_id: &str, platform: GamePlatform) -> usize {
         .flatten()
         .filter_map(Result::ok)
         .filter(|entry| entry.path().is_file()
-            && entry.path().extension().is_some_and(|value| value.eq_ignore_ascii_case(extension)))
+            && entry.path().extension().and_then(|value| value.to_str()).is_some_and(|value| value.eq_ignore_ascii_case(extension)))
         .count()
 }
 
