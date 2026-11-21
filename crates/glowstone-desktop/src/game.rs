@@ -262,7 +262,7 @@ async fn launch_horizon(
     if !horizon_ready {
         // Horizon does not ship Mojang's game files. CrustCore installs the
         // official, licensed files and matching Java runtime in the shared root.
-        let mut java_options = JavaLaunchOptions::new(&game_root, pins.version.clone());
+        let mut java_options = JavaLaunchOptions::new(game_root.clone(), pins.version.clone());
         java_options.download_concurrency = 10;
         java_options.memory.max = "4G".to_owned();
         let java_launch = JavaLaunch::new(java_options, account.clone())
