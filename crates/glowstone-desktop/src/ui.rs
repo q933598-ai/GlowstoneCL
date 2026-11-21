@@ -3398,6 +3398,39 @@ fn settings_page(app: &App) -> Element<'_, Message> {
         settings_card("БЕЗОПАСНОСТЬ", "Microsoft refresh token", "Токены сохраняются через системное хранилище паролей. Если Secret Service недоступен, приложение покажет предупреждение."),
         container(
             column![
+                row![
+                    column![
+                        text("CURSEFORGE API").size(9).color(ORANGE),
+                        text("Ключ API CurseForge").size(13).color(TEXT),
+                        text(if app.curseforge_api_key_configured {
+                            "Ключ сохранён в системном хранилище. Его значение не записывается в state.json."
+                        } else {
+                            "Вставь API key, созданный в панели CurseForge. Без него поиск и скачивание недоступны."
+                        }).size(9).color(MUTED),
+                    ].spacing(5),
+                    Space::new().width(Length::Fill),
+                    if app.curseforge_api_key_configured {
+                        status_chip("СОХРАНЁН", CYAN_DARK, GREEN)
+                    } else {
+                        status_chip("НЕ НАСТРОЕН", PANEL_LIGHT, ORANGE)
+                    },
+                ].align_y(Alignment::Center),
+                row![
+                    text_input("CurseForge API key", &app.curseforge_api_key_input)
+                        .secure(true)
+                        .on_input(Message::CurseForgeApiKeyChanged)
+                        .padding(10)
+                        .size(10)
+                        .width(Length::Fill),
+                    primary_button("Сохранить", Message::SaveCurseForgeApiKey),
+                ].spacing(8),
+            ].spacing(9)
+        )
+        .padding(15)
+        .width(Length::Fill)
+        .style(|_| glass_style(PANEL, EDGE)),
+        container(
+            column![
                 text("Данные сейчас").size(12).color(TEXT),
                 text(format!("{} сборок", app.data.instances.len())).size(10).color(MUTED),
                 text(format!("{} аккаунтов", app.data.accounts.len())).size(10).color(MUTED),
