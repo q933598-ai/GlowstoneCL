@@ -35,8 +35,11 @@ struct Tile {
 #[derive(Debug, Clone, Copy)]
 struct CubeUv {
     front: (u32, u32),
-    side: (u32, u32),
+    back: (u32, u32),
+    right: (u32, u32),
+    left: (u32, u32),
     top: (u32, u32),
+    bottom: (u32, u32),
 }
 
 impl<Message> canvas::Program<Message> for SkinPreview {
@@ -66,32 +69,34 @@ impl<Message> canvas::Program<Message> for SkinPreview {
         let yaw = 0.58 + self.angle;
 
         let head_uv = CubeUv {
-            front: (8, 8),
-            side: (0, 8),
-            top: (8, 0),
+            front: (8, 8), back: (24, 8), right: (0, 8), left: (16, 8),
+            top: (8, 0), bottom: (16, 0),
         };
         let body_uv = CubeUv {
-            front: (20, 20),
-            side: (16, 20),
-            top: (20, 16),
+            front: (20, 20), back: (32, 20), right: (16, 20), left: (28, 20),
+            top: (20, 16), bottom: (28, 16),
         };
         let right_arm_uv = CubeUv {
-            front: (44, 20),
-            side: (40, 20),
-            top: (44, 16),
+            front: (44, 20), back: (52, 20), right: (40, 20), left: (48, 20),
+            top: (44, 16), bottom: (48, 16),
         };
         let left_arm_uv = if texture_height >= 64 {
-            CubeUv { front: (36, 52), side: (32, 52), top: (36, 48) }
+            CubeUv {
+                front: (36, 52), back: (44, 52), right: (32, 52), left: (40, 52),
+                top: (36, 48), bottom: (40, 48),
+            }
         } else {
             right_arm_uv
         };
         let right_leg_uv = CubeUv {
-            front: (4, 20),
-            side: (0, 20),
-            top: (4, 16),
+            front: (4, 20), back: (12, 20), right: (0, 20), left: (8, 20),
+            top: (4, 16), bottom: (8, 16),
         };
         let left_leg_uv = if texture_height >= 64 {
-            CubeUv { front: (20, 52), side: (16, 52), top: (20, 48) }
+            CubeUv {
+                front: (20, 52), back: (28, 52), right: (16, 52), left: (24, 52),
+                top: (20, 48), bottom: (24, 48),
+            }
         } else {
             right_leg_uv
         };
@@ -112,8 +117,8 @@ impl<Message> canvas::Program<Message> for SkinPreview {
         let arm_width = if self.model == SkinModel::Slim { 3.0 } else { 4.0 };
         add_cube(
             &mut tiles, &self.texture, yaw, scale, center,
-            Vec3 { x: -8.0, y: 12.0, z: -2.0 },
-            Vec3 { x: -8.0 + arm_width, y: 24.0, z: 2.0 },
+            Vec3 { x: -4.0 - arm_width, y: 12.0, z: -2.0 },
+            Vec3 { x: -4.0, y: 24.0, z: 2.0 },
             left_arm_uv, (arm_width as u32, 12), false,
         );
         add_cube(
@@ -165,17 +170,31 @@ fn add_cube(
     _overlay: bool,
 ) {
     let (face_width, face_height) = face_size;
+    let face_depth = (max.z - min.z) as u32;
+    let face_height = (max.y - min.y) as u32;
     add_front_face(
         tiles, texture, uv.front, face_width, face_height,
         min, max, max.z, yaw, scale, center, 1.0,
     );
+    add_back_face(
+        tiles, texture, uv.back, face_width, face_height,
+        min, max, min.z, yaw, scale, center, 0.88,
+    );
     add_right_face(
-        tiles, texture, uv.side, max.y as u32 - min.y as u32,
-        (max.z - min.z) as u32, min, max, yaw, scale, center, 0.76,
+        tiles, texture, uv.right, face_height, face_depth,
+        min, max, yaw, scale, center, 0.76,
+    );
+    add_left_face(
+        tiles, texture, uv.left, face_height, face_depth,
+        min, max, yaw, scale, center, 0.82,
     );
     add_top_face(
-        tiles, texture, uv.top, face_width, (max.z - min.z) as u32,
+        tiles, texture, uv.top, face_width, face_depth,
         min, max, yaw, scale, center, 0.92,
+    );
+    add_bottom_face(
+        tiles, texture, uv.bottom, face_width, face_depth,
+        min, max, yaw, scale, center, 0.62,
     );
 }
 
@@ -242,6 +261,69 @@ fn add_right_face(
     }
 }
 
+fn add_back_face(
+    tiles: &mut Vec<Tile>,
+    texture: &[[u8; 4]],
+    uv: (u32, u32),
+    face_width: u32,
+    face_height: u32,
+    min: Vec3,
+    max: Vec3,
+    z: f32,
+    yaw: f32,
+    scale: f32,
+    center: Point,
+    shade: f32,
+) {
+    for row in 0..face_height {
+        for column in 0..face_width {
+            let color = texel(texture, uv.0 + (face_width - 1 - column), uv.1 + row, shade);
+            if color.a < 0.02 { continue; }
+            let x0 = min.x + (max.x - min.x) * column as f32 / face_width as f32;
+            let x1 = min.x + (max.x - min.x) * (column + 1) as f32 / face_width as f32;
+            let y1 = max.y - (max.y - min.y) * row as f32 / face_height as f32;
+            let y0 = max.y - (max.y - min.y) * (row + 1) as f32 / face_height as f32;
+            push_tile(tiles, [
+                Vec3 { x: x1, y: y1, z },
+                Vec3 { x: x0, y: y1, z },
+                Vec3 { x: x0, y: y0, z },
+                Vec3 { x: x1, y: y0, z },
+            ], color, yaw, scale, center);
+        }
+    }
+}
+
+fn add_left_face(
+    tiles: &mut Vec<Tile>,
+    texture: &[[u8; 4]],
+    uv: (u32, u32),
+    face_height: u32,
+    face_depth: u32,
+    min: Vec3,
+    max: Vec3,
+    yaw: f32,
+    scale: f32,
+    center: Point,
+    shade: f32,
+) {
+    for row in 0..face_height {
+        for column in 0..face_depth {
+            let color = texel(texture, uv.0 + (face_depth - 1 - column), uv.1 + row, shade);
+            if color.a < 0.02 { continue; }
+            let z0 = min.z + (max.z - min.z) * column as f32 / face_depth as f32;
+            let z1 = min.z + (max.z - min.z) * (column + 1) as f32 / face_depth as f32;
+            let y1 = max.y - (max.y - min.y) * row as f32 / face_height as f32;
+            let y0 = max.y - (max.y - min.y) * (row + 1) as f32 / face_height as f32;
+            push_tile(tiles, [
+                Vec3 { x: min.x, y: y1, z: z1 },
+                Vec3 { x: min.x, y: y1, z: z0 },
+                Vec3 { x: min.x, y: y0, z: z0 },
+                Vec3 { x: min.x, y: y0, z: z1 },
+            ], color, yaw, scale, center);
+        }
+    }
+}
+
 fn add_top_face(
     tiles: &mut Vec<Tile>,
     texture: &[[u8; 4]],
@@ -268,6 +350,37 @@ fn add_top_face(
                 Vec3 { x: x1, y: max.y, z: z0 },
                 Vec3 { x: x1, y: max.y, z: z1 },
                 Vec3 { x: x0, y: max.y, z: z1 },
+            ], color, yaw, scale, center);
+        }
+    }
+}
+
+fn add_bottom_face(
+    tiles: &mut Vec<Tile>,
+    texture: &[[u8; 4]],
+    uv: (u32, u32),
+    face_width: u32,
+    face_depth: u32,
+    min: Vec3,
+    max: Vec3,
+    yaw: f32,
+    scale: f32,
+    center: Point,
+    shade: f32,
+) {
+    for row in 0..face_depth {
+        for column in 0..face_width {
+            let color = texel(texture, uv.0 + column, uv.1 + row, shade);
+            if color.a < 0.02 { continue; }
+            let x0 = min.x + (max.x - min.x) * column as f32 / face_width as f32;
+            let x1 = min.x + (max.x - min.x) * (column + 1) as f32 / face_width as f32;
+            let z0 = min.z + (max.z - min.z) * row as f32 / face_depth as f32;
+            let z1 = min.z + (max.z - min.z) * (row + 1) as f32 / face_depth as f32;
+            push_tile(tiles, [
+                Vec3 { x: x0, y: min.y, z: z1 },
+                Vec3 { x: x1, y: min.y, z: z1 },
+                Vec3 { x: x1, y: min.y, z: z0 },
+                Vec3 { x: x0, y: min.y, z: z0 },
             ], color, yaw, scale, center);
         }
     }
