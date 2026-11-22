@@ -138,7 +138,7 @@ pub async fn search(instance: GameInstance, query: String) -> Result<Vec<ModProj
         .append_pair("query", query.trim())
         .append_pair("facets", &facets)
         .append_pair("index", "downloads")
-        .append_pair("limit", "30");
+        .append_pair("limit", "18");
     let response = http
         .get(search_url)
         .send()
