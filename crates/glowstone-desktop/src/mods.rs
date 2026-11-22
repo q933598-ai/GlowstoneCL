@@ -51,6 +51,18 @@ pub struct InstalledMod {
     #[serde(skip)]
     pub icon_data: Option<Vec<u8>>,
 }
+/// Any JAR found in this profile's mods folder, including files installed
+/// manually or by a modpack rather than through GlowstoneCL.
+#[derive(Debug, Clone)]
+pub struct InstalledModFile {
+    pub file_name: String,
+    pub title: String,
+    pub version: String,
+    pub size: u64,
+    pub managed: bool,
+}
+
+
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct InstalledManifest {
@@ -311,6 +323,89 @@ pub fn installed(instance_id: &str) -> Result<Vec<InstalledMod>, String> {
     mods.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
     hydrate_installed_icons(&mut mods);
     Ok(mods)
+}
+
+/// Scans the actual mods directory instead of relying only on GlowstoneCL's
+/// Modrinth/CurseForge manifests, so manually added and modpack JARs are visible.
+pub fn local_files(instance_id: &str) -> Result<Vec<InstalledModFile>, String> {
+    let directory = store::instance_directory(instance_id)?.join("mods");
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| format!("Не удалось открыть каталог модов: {error}"))?;
+    let managed_names: HashSet<String> = read_manifest(instance_id)?.mods
+        .into_iter()
+        .filter_map(|item| safe_filename(&item.file_name).map(str::to_owned))
+        .chain(
+            crate::curseforge::installed(instance_id).unwrap_or_default()
+                .into_iter()
+                .filter_map(|item| safe_filename(&item.file_name).map(str::to_owned))
+        )
+        .collect();
+
+    let mut result = Vec::new();
+    for entry in std::fs::read_dir(&directory)
+        .map_err(|error| format!("Не удалось прочитать каталог модов: {error}"))?
+    {
+        let entry = entry.map_err(|error| format!("Не удалось прочитать файл мода: {error}"))?;
+        let path = entry.path();
+        let metadata = std::fs::symlink_metadata(&path)
+            .map_err(|error| format!("Не удалось прочитать свойства мода: {error}"))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file()
+            || !path.extension().and_then(|value| value.to_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case("jar"))
+        {
+            continue;
+        }
+        let file_name = entry.file_name().to_string_lossy().into_owned();
+        let (title, version) = read_mod_jar_metadata(&path);
+        result.push(InstalledModFile {
+            managed: managed_names.contains(&file_name),
+            title,
+            version,
+            file_name,
+            size: metadata.len(),
+        });
+    }
+    result.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    Ok(result)
+}
+
+fn read_mod_jar_metadata(path: &Path) -> (String, String) {
+    use std::io::Read as _;
+    let fallback = path.file_stem().and_then(|value| value.to_str())
+        .unwrap_or("Minecraft mod").to_owned();
+    let Ok(file) = std::fs::File::open(path) else {
+        return (fallback, "unknown".to_owned());
+    };
+    let Ok(mut archive) = zip::ZipArchive::new(file) else {
+        return (fallback, "unknown".to_owned());
+    };
+    for metadata_path in ["fabric.mod.json", "quilt.mod.json"] {
+        let Ok(mut metadata_file) = archive.by_name(metadata_path) else { continue };
+        let mut content = String::new();
+        if metadata_file.read_to_string(&mut content).is_err() { continue; }
+        if let Ok(value) = serde_json::from_str::<Value>(&content) {
+            let name = value["name"].as_str().or_else(|| value["id"].as_str())
+                .unwrap_or(&fallback).to_owned();
+            let version = value["version"].as_str().unwrap_or("unknown").to_owned();
+            return (name, version);
+        }
+    }
+    (fallback, "metadata unavailable".to_owned())
+}
+
+/// Safely removes one JAR by its file name. Manifest entries are pruned by the
+/// existing installed() filters on the next refresh, preserving all other mods.
+pub fn remove_file(instance_id: &str, file_name: &str) -> Result<(), String> {
+    let file_name = safe_filename(file_name)
+        .ok_or_else(|| "Недопустимое имя JAR-файла.".to_owned())?;
+    let path = store::instance_directory(instance_id)?.join("mods").join(file_name);
+    let metadata = std::fs::symlink_metadata(&path)
+        .map_err(|error| format!("Не удалось найти файл мода: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("Удалять можно только обычные JAR-файлы из каталога mods.".to_owned());
+    }
+    std::fs::remove_file(&path)
+        .map_err(|error| format!("Не удалось удалить мод: {error}"))
 }
 
 fn safe_filename(value: &str) -> Option<&str> {
