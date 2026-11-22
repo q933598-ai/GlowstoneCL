@@ -435,7 +435,7 @@ mod tests {
             "sha256": hex_digest(&Sha256::digest(b"expected"))
         })).is_ok());
         assert!(verify_hashes(b"tampered", &serde_json::json!({
-            "sha256": format!("{:x}", Sha256::digest(b"expected"))
+            "sha256": hex_digest(&Sha256::digest(b"expected"))
         })).is_err());
     }
 }
