@@ -1145,6 +1145,10 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             if app.mod_target_instance.as_deref() == Some(target_id.as_str()) {
                 if let Ok(installed) = result {
                     app.installed_mods = installed;
+                    return iced::Task::perform(
+                        mods::local_files_async(target_id.clone()),
+                        move |result| Message::LocalModFilesLoaded(target_id, result),
+                    );
                 }
             }
         }
@@ -1192,12 +1196,15 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     Ok(installed) => {
                         let added = installed.iter().filter(|item| item.dependency).count();
                         app.installed_mods = installed;
-                        app.local_mod_files = mods::local_files(&target_id).unwrap_or_default();
                         app.notice = Some(if added > 0 {
                             format!("Мод установлен. Также добавлено обязательных зависимостей: {added}.")
                         } else {
                             "Мод успешно установлен в выбранную сборку.".to_owned()
                         });
+                        return iced::Task::perform(
+                            mods::local_files_async(target_id.clone()),
+                            move |result| Message::LocalModFilesLoaded(target_id, result),
+                        );
                     }
                     Err(error) => app.notice = Some(error),
                 }
@@ -1208,8 +1215,11 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 match mods::remove(&target_id, &project_id) {
                     Ok(installed) => {
                         app.installed_mods = installed;
-                        app.local_mod_files = mods::local_files(&target_id).unwrap_or_default();
                         app.notice = Some("Мод удалён из этой сборки.".to_owned());
+                        return iced::Task::perform(
+                            mods::local_files_async(target_id.clone()),
+                            move |result| Message::LocalModFilesLoaded(target_id, result),
+                        );
                     }
                     Err(error) => app.notice = Some(error),
                 }
