@@ -1058,13 +1058,36 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         Message::RemoveInstalledModFile(instance_id, file_name) => {
             match mods::remove_file(&instance_id, &file_name) {
                 Ok(()) => {
-                    app.local_mod_files = mods::local_files(&instance_id).unwrap_or_default();
                     app.installed_mods = mods::installed(&instance_id).unwrap_or_default();
                     app.curseforge_installed_mods = curseforge::installed(&instance_id).unwrap_or_default();
                     app.notice = Some(format!("Мод {} удалён из сборки.", file_name));
+                    return iced::Task::perform(
+                        mods::local_files_async(instance_id.clone()),
+                        move |result| Message::LocalModFilesLoaded(instance_id, result),
+                    );
                 }
                 Err(error) => app.notice = Some(error),
             }
+        }
+        Message::LocalModFilesLoaded(instance_id, result) => {
+            if app.mod_target_instance.as_deref() == Some(instance_id.as_str())
+                || app.instance_settings_id.as_deref() == Some(instance_id.as_str())
+            {
+                match result {
+                    Ok(files) => {
+                        app.local_mod_files = files;
+                        app.installed_mods_visible = 24;
+                    }
+                    Err(error) => app.notice = Some(error),
+                }
+            }
+        }
+        Message::InstalledModsFilterChanged(value) => {
+            app.installed_mod_filter = value;
+            app.installed_mods_visible = 24;
+        }
+        Message::ShowMoreInstalledMods => {
+            app.installed_mods_visible = app.installed_mods_visible.saturating_add(24);
         }
         Message::OpenInstanceMods(target_id) => {
             app.local_mod_files = mods::local_files(&target_id).unwrap_or_default();
@@ -1371,6 +1394,25 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     "Играет в Minecraft".to_owned(),
                     game_name,
                 ));
+            }
+            let instance_minimize = store::load_instance_settings(&id)
+                .map(|settings| settings.minimize_to_tray_on_launch)
+                .unwrap_or(false);
+            if app.data.settings.minimize_to_tray_on_launch || instance_minimize {
+                match crate::tray::ensure() {
+                    Ok(()) => {
+                        app.tray_active = true;
+                        tasks.push(iced::window::oldest().then(|window_id| {
+                            match window_id {
+                                Some(window_id) => iced::window::minimize(window_id, true),
+                                None => iced::Task::none(),
+                            }
+                        }));
+                    }
+                    Err(error) => {
+                        app.notice = Some(format!("{error} Игра продолжит запускаться в обычном окне."));
+                    }
+                }
             }
             return iced::Task::batch(tasks);
         }
@@ -2032,6 +2074,11 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             }
         }
         Message::DiscordClientIdChanged(value) => app.data.settings.discord_client_id = value,
+        Message::CheckDiscordDiagnostics => {
+            app.discord_diagnostics = crate::discord::diagnostics();
+            app.notice = Some(app.discord_diagnostics.clone());
+        }
+        Message::DiscordDiagnosticsLoaded(details) => app.discord_diagnostics = details,
         Message::SaveDiscordClientId => {
             app.notice = store::save(&app.data).err()
                 .map(|error| format!("Не удалось сохранить Discord Application ID: {error}"))
@@ -2074,6 +2121,38 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 }
             }
         }
+        Message::ToggleAnimations(enabled) => {
+            app.data.settings.animations_enabled = enabled;
+            if !enabled {
+                app.page_transition_alpha = 0.0;
+            }
+            app.notice = store::save(&app.data).err()
+                .map(|error| format!("Не удалось сохранить настройку анимаций: {error}"))
+                .or_else(|| Some(if enabled {
+                    "Анимации интерфейса включены. На вкладке модов фоновые эффекты при этом не обновляются постоянно.".to_owned()
+                } else {
+                    "Анимации отключены; интерфейс использует статичные состояния.".to_owned()
+                }));
+        }
+        Message::ToggleHoverSounds(enabled) => {
+            app.data.settings.hover_sounds_enabled = enabled;
+            app.notice = store::save(&app.data).err()
+                .map(|error| format!("Не удалось сохранить звуки наведения: {error}"))
+                .or_else(|| Some(if enabled { "Звук наведения включён.".to_owned() } else { "Звук наведения выключен.".to_owned() }));
+        }
+        Message::ToggleMinimizeToTray(enabled) => {
+            app.data.settings.minimize_to_tray_on_launch = enabled;
+            app.notice = store::save(&app.data).err()
+                .map(|error| format!("Не удалось сохранить настройку сворачивания в трей: {error}"))
+                .or_else(|| Some(if enabled {
+                    "При запуске игры лаунчер будет сворачиваться в системный трей.".to_owned()
+                } else {
+                    "Автоматическое сворачивание в трей отключено.".to_owned()
+                }));
+        }
+        Message::ToggleInstanceMinimizeToTray(enabled) => {
+            app.instance_settings.minimize_to_tray_on_launch = enabled;
+        }
         Message::ToggleUpdateNotes(enabled) => {
             app.data.settings.show_update_notes = enabled;
             app.notice = store::save(&app.data).err()
@@ -2089,6 +2168,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             app.updates_busy = false;
             match result {
                 Ok(entries) => {
+                    app.update_available = updates::update_available(&entries);
                     app.updates = entries;
                     app.updates_error = None;
                 }
@@ -2113,6 +2193,24 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         }
         Message::UiAnimationTick => {
             app.page_transition_alpha = (app.page_transition_alpha - 0.06).max(0.0);
+        }
+        Message::HoverButton => {
+            if app.data.settings.hover_sounds_enabled {
+                play_hover_sound();
+            }
+        }
+        Message::PollTray => {
+            if crate::tray::poll_restore_request() {
+                return update(app, Message::RestoreFromTray);
+            }
+        }
+        Message::RestoreFromTray => {
+            return iced::window::oldest().then(|window_id| {
+                match window_id {
+                    Some(window_id) => iced::window::minimize(window_id, false),
+                    None => iced::Task::none(),
+                }
+            });
         }
         Message::OpenRepository => {
             app.notice = Some(match webbrowser::open("https://github.com/q933598-ai/GlowstoneCL") {
