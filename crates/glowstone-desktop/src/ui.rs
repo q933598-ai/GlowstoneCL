@@ -65,7 +65,7 @@ pub enum PlatformChoice {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum VersionFilter {
+pub enum VersionFilter {
     Release,
     Snapshot,
     Beta,
