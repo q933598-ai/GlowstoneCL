@@ -64,7 +64,7 @@ pub struct SkinCollection {
     pub active_skin_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
     pub microsoft_client_id: String,
@@ -82,6 +82,25 @@ pub struct AppSettings {
     pub animations_enabled: bool,
     pub hover_sounds_enabled: bool,
     pub minimize_to_tray_on_launch: bool,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            microsoft_client_id: String::new(),
+            selected_account_id: None,
+            selected_instance_id: None,
+            background_image: None,
+            telemetry_enabled: false,
+            language: "ru".to_owned(),
+            discord_rpc_enabled: false,
+            discord_client_id: String::new(),
+            show_update_notes: false,
+            animations_enabled: true,
+            hover_sounds_enabled: false,
+            minimize_to_tray_on_launch: false,
+        }
+    }
 }
 
 fn default_true() -> bool { true }
