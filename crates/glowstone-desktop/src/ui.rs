@@ -2444,13 +2444,22 @@ pub fn view(app: &App) -> Element<'_, Message> {
     .clip(true)
     .into();
 
-    if app.launch_console_open {
-        stack![base, launch_debug_window(app)]
+    let with_creator: Element<'_, Message> = if app.show_instance_creator {
+        stack![base, instance_creator_modal(app)]
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     } else {
         base
+    };
+
+    if app.launch_console_open {
+        stack![with_creator, launch_debug_window(app)]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else {
+        with_creator
     }
 }
 
@@ -3590,7 +3599,6 @@ fn version_choices_view(app: &App) -> Element<'_, Message> {
                 || choice.label.to_ascii_lowercase().contains(&query)
                 || choice.kind.to_ascii_lowercase().contains(&query)
         })
-        .take(14)
         .collect();
 
     let has_matches = !matches.is_empty();
@@ -3658,6 +3666,163 @@ fn version_choices_view(app: &App) -> Element<'_, Message> {
     container(content)
         .width(Length::Fill)
         .style(|_| glass_style(PANEL_LIGHT, EDGE))
+        .into()
+}
+
+fn instance_creator_modal(app: &App) -> Element<'_, Message> {
+    let loaders: &[LoaderKind] = match app.platform {
+        PlatformChoice::Java => &[
+            LoaderKind::Vanilla,
+            LoaderKind::Fabric,
+            LoaderKind::Forge,
+            LoaderKind::NeoForge,
+            LoaderKind::Quilt,
+        ],
+        PlatformChoice::Horizon | PlatformChoice::HorizonOffline => &[
+            LoaderKind::HorizonContent,
+            LoaderKind::HorizonNative,
+        ],
+    };
+
+    let mut loader_buttons = row![];
+    for loader in loaders {
+        loader_buttons = loader_buttons.push(loader_button(*loader, app.loader));
+    }
+    loader_buttons = loader_buttons.spacing(7);
+
+    let form = container(
+        column![
+            row![
+                column![
+                    text("Новая сборка").size(15).color(TEXT),
+                    text("Создай отдельный профиль с собственными модами, настройками и мирами.")
+                        .size(9).color(MUTED),
+                ]
+                .spacing(3),
+                Space::new().width(Length::Fill),
+                status_chip("НОВЫЙ ПРОФИЛЬ", CYAN_DARK, CYAN),
+                quiet_button("Закрыть", Message::CloseCreateInstance),
+            ]
+            .align_y(Alignment::Center),
+            text("Название").size(9).color(MUTED),
+            text_input("Например, My Survival", &app.instance_name)
+                .on_input(Message::InstanceNameChanged)
+                .padding(10)
+                .size(11),
+            text_input("Описание сборки (необязательно)", &app.instance_description)
+                .on_input(Message::InstanceDescriptionChanged)
+                .padding(10)
+                .size(10),
+            text("Платформа Minecraft").size(9).color(MUTED),
+            row![
+                choice_button("Minecraft Java", app.platform == PlatformChoice::Java, Message::SelectPlatform(PlatformChoice::Java)),
+                choice_button("Horizon", app.platform == PlatformChoice::Horizon, Message::SelectPlatform(PlatformChoice::Horizon)),
+                choice_button("Horizon Offline", app.platform == PlatformChoice::HorizonOffline, Message::SelectPlatform(PlatformChoice::HorizonOffline)),
+            ].spacing(7),
+            text(match app.platform {
+                PlatformChoice::Java => "Версия Minecraft Java",
+                PlatformChoice::Horizon => "Версия Horizon Runtime",
+                PlatformChoice::HorizonOffline => "Версия Horizon Offline Runtime",
+            }).size(9).color(MUTED),
+            text_input(
+                match app.platform {
+                    PlatformChoice::Java => "ID версии: 1.21.1, b1.7.3, a1.0.16…",
+                    PlatformChoice::Horizon => "ID сборки: stable или nightly-YYYY-MM-DD-commit",
+                    PlatformChoice::HorizonOffline => "ID сборки offline fork-а или stable",
+                },
+                &app.instance_version,
+            )
+                .on_input(Message::InstanceVersionChanged)
+                .padding(10)
+                .size(11),
+            row![
+                text_input(
+                    match app.platform {
+                        PlatformChoice::Java => "Фильтр: release, snapshot, beta, alpha…",
+                        PlatformChoice::Horizon => "Фильтр релизов Horizon…",
+                        PlatformChoice::HorizonOffline => "Фильтр релизов Horizon Offline…",
+                    },
+                    &app.version_query,
+                )
+                    .on_input(Message::VersionQueryChanged)
+                    .padding(9)
+                    .size(10)
+                    .width(Length::Fill),
+                quiet_button("Обновить", Message::ReloadVersionCatalog),
+            ]
+            .spacing(8),
+            version_choices_view(app),
+            text("Платформа").size(9).color(MUTED),
+            text("Загрузчик").size(9).color(MUTED),
+            loader_buttons,
+            if app.platform == PlatformChoice::Java {
+                column![
+                    text("Java runtime").size(9).color(MUTED),
+                    row![
+                        text_input("Пусто = автоматически подобрать Java", &app.create_java_path)
+                            .on_input(Message::CreateJavaPathChanged).padding(9).size(9).width(Length::Fill),
+                        quiet_button("Обзор", Message::PickCreateJava),
+                    ].spacing(8),
+                    text("Память JVM · можно оставить значения по умолчанию").size(9).color(MUTED),
+                    row![
+                        column![
+                            text("Минимум").size(8).color(SUBTLE),
+                            text_input(if app.loader == LoaderKind::Vanilla { "Авто — 1G" } else { "Авто — 2G" }, &app.create_memory_min).on_input(Message::CreateMemoryMinChanged).padding(9).size(10),
+                        ].spacing(4).width(Length::Fill),
+                        column![
+                            text("Максимум").size(8).color(SUBTLE),
+                            text_input(if app.loader == LoaderKind::Vanilla { "Авто — 4G" } else { "Авто — 6G" }, &app.create_memory_max).on_input(Message::CreateMemoryMaxChanged).padding(9).size(10),
+                        ].spacing(4).width(Length::Fill),
+                    ].spacing(8),
+                ].spacing(7)
+            } else {
+                column![
+                    text("Java и память настраиваются выбранным Horizon runtime автоматически.")
+                        .size(8).color(MUTED),
+                ]
+            },
+            row![
+                Space::new().width(Length::Fill),
+                quiet_button("Отмена", Message::CloseCreateInstance),
+                quiet_button("Импортировать модпак", Message::Navigate(Page::Modpacks)),
+                primary_button("Создать сборку", Message::CreateInstance),
+            ].spacing(8),
+        ]
+        .spacing(8),
+    )
+    .padding(16)
+    .width(Length::Fill)
+    .style(|_| glass_style(PANEL, EDGE_BRIGHT));
+
+    let dimmer: Element<'_, Message> = container(
+        Space::new().width(Length::Fill).height(Length::Fill),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(|_| container::Style {
+        background: Some(Color::from_rgba(0.015, 0.02, 0.03, 0.80).into()),
+        ..Default::default()
+    })
+    .into();
+
+    let modal: Element<'_, Message> = container(scrollable(form).height(Length::Fill))
+        .width(Length::Fill)
+        .max_width(760)
+        .height(Length::Fill)
+        .max_height(760)
+        .padding(18)
+        .style(|_| glass_style(Color::from_rgba(0.10, 0.12, 0.15, 0.99), EDGE_BRIGHT))
+        .into();
+    let centered: Element<'_, Message> = container(modal)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .into();
+
+    stack![dimmer, centered]
+        .width(Length::Fill)
+        .height(Length::Fill)
         .into()
 }
 
@@ -3862,34 +4027,9 @@ fn instances_page(app: &App) -> Element<'_, Message> {
     .width(Length::Fill)
     .into();
 
-    if app.show_instance_creator {
-        let dimmer: Element<'_, Message> = container(
-            Space::new().width(Length::Fill).height(Length::Fill),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(|_| container::Style {
-            background: Some(Color::from_rgba(0.015, 0.02, 0.03, 0.78).into()),
-            ..Default::default()
-        })
-        .into();
-        let modal: Element<'_, Message> = container(scrollable(form).height(Length::Fill))
-            .width(Length::Fill)
-            .max_width(760)
-            .height(Length::Fill)
-            .max_height(760)
-            .padding(18)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .style(|_| glass_style(Color::from_rgba(0.10, 0.12, 0.15, 0.98), EDGE_BRIGHT))
-            .into();
-        stack![base, dimmer, modal]
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-    } else {
-        base
-    }
+    base
+}
+
 }
 
 fn loader_button(loader: LoaderKind, current: LoaderKind) -> Element<'static, Message> {
