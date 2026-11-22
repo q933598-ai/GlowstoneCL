@@ -38,6 +38,7 @@ uuid = { version = "1.18", features = ["v4"] }
 webbrowser = "1.0"
 base64 = "0.22"
 flate2 = "1.1"
+fastnbt = "2.6"
 ring = "0.17"
 sha1 = "0.11"
 sha2 = "0.11"
