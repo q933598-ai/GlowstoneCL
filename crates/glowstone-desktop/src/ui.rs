@@ -2780,6 +2780,9 @@ fn news_page(app: &App) -> Element<'_, Message> {
     ]
     .spacing(12)
     .width(Length::Fill);
+    if app.data.settings.show_update_notes {
+        list = list.push(update_notes_panel(app));
+    }
     for (index, entry) in entries.iter().enumerate() {
         let entry = *entry;
         list = list.push(
@@ -3787,6 +3790,75 @@ fn account_card(account: &AccountProfile, selected: bool) -> Element<'static, Me
     .into()
 }
 
+fn update_notes_panel(app: &App) -> Element<'_, Message> {
+    let mut entries = column![].spacing(8);
+    if app.updates_busy {
+        entries = entries.push(text("Проверяю историю изменений на GitHub…").size(9).color(MUTED));
+    } else if let Some(error) = &app.updates_error {
+        entries = entries.push(text(error.clone()).size(9).color(RED));
+    } else if app.updates.is_empty() {
+        entries = entries.push(text("Нажми «Проверить изменения», чтобы получить последние записи из GitHub.").size(9).color(MUTED));
+    } else {
+        for entry in app.updates.iter().take(8) {
+            entries = entries.push(
+                row![
+                    icon("git-commit", CYAN, 13.0),
+                    column![
+                        text(entry.message.clone()).size(9).color(TEXT),
+                        text(entry.date.chars().take(10).collect::<String>()).size(7).color(SUBTLE),
+                    ]
+                    .spacing(3)
+                    .width(Length::Fill),
+                    quiet_button("GitHub", Message::OpenUpdate(entry.url.clone())),
+                ]
+                .align_y(Alignment::Center)
+                .spacing(9),
+            );
+        }
+    }
+
+    container(
+        column![
+            row![
+                column![
+                    text("ЖУРНАЛ ИЗМЕНЕНИЙ").size(9).color(CYAN),
+                    text("Что нового в GlowstoneCL").size(13).color(TEXT),
+                ]
+                .spacing(4),
+                Space::new().width(Length::Fill),
+                primary_button("Проверить изменения", Message::CheckUpdates),
+                quiet_button("Релизы", Message::OpenGithubReleases),
+            ]
+            .align_y(Alignment::Center)
+            .spacing(8),
+            text("Показываются последние коммиты ветки разработки. Автоматическая установка бинарных обновлений появится после публикации подписанных релизов.")
+                .size(8)
+                .color(MUTED),
+            entries,
+        ]
+        .spacing(10),
+    )
+    .padding(15)
+    .width(Length::Fill)
+    .style(|_| glass_style(PANEL, EDGE))
+    .into()
+}
+
+fn preference_panel(title: &'static str, description: &'static str, content: Element<'static, Message>) -> Element<'static, Message> {
+    container(
+        column![
+            text(title).size(12).color(TEXT),
+            text(description).size(8).color(MUTED),
+            content,
+        ]
+        .spacing(8),
+    )
+    .padding(15)
+    .width(Length::Fill)
+    .style(|_| glass_style(PANEL, EDGE))
+    .into()
+}
+
 fn settings_page(app: &App) -> Element<'_, Message> {
     let data_path = if cfg!(target_os = "linux") {
         "~/.local/share/GlowstoneCL/state.json"
@@ -3799,6 +3871,78 @@ fn settings_page(app: &App) -> Element<'_, Message> {
         settings_card("LINUX DISPLAY", "Нативный Wayland и X11", "GlowstoneCL поддерживает оба backend. В Wayland-сессии можно запускать приложение напрямую через Wayland без XWayland."),
         settings_card("ХРАНЕНИЕ", "Профили и сборки", data_path),
         settings_card("БЕЗОПАСНОСТЬ", "Microsoft refresh token", "Токены сохраняются через системное хранилище паролей. Если Secret Service недоступен, приложение покажет предупреждение."),
+        preference_panel(
+            "ФОН И ОБОИ",
+            "Выбери собственное изображение. Предустановленные обои будут автоматически появляться из assets/backgrounds после добавления файлов проекта.",
+            row![
+                primary_button("Выбрать изображение", Message::PickBackground),
+                quiet_button("Сбросить фон", Message::ResetBackground),
+            ]
+            .spacing(8)
+            .into(),
+        ),
+        preference_panel(
+            "ЯЗЫК",
+            "Выбор сохраняется в профиле приложения. Сейчас доступны русская и английская локали; перевод отдельных экранов ещё расширяется.",
+            row![
+                choice_button("Русский", app.data.settings.language != "en", Message::SetLanguage("ru".to_owned())),
+                choice_button("English", app.data.settings.language == "en", Message::SetLanguage("en".to_owned())),
+            ]
+            .spacing(8)
+            .into(),
+        ),
+        preference_panel(
+            "ДИАГНОСТИКА И ПРИВАТНОСТЬ",
+            "При включении ошибки запуска и лаунчера сохраняются локально в diagnostics/errors.log. Ничего не отправляется по сети; удалённый сервер телеметрии ещё не подключён.",
+            row![
+                choice_button("Включена", app.data.settings.telemetry_enabled, Message::ToggleTelemetry(true)),
+                choice_button("Выключена", !app.data.settings.telemetry_enabled, Message::ToggleTelemetry(false)),
+            ]
+            .spacing(8)
+            .into(),
+        ),
+        preference_panel(
+            "DISCORD RICH PRESENCE",
+            "Показывает статус GlowstoneCL в Discord. Нужен Application ID из Discord Developer Portal и запущенный Discord-клиент.",
+            column![
+                text_input("Discord Application ID", &app.data.settings.discord_client_id)
+                    .on_input(Message::DiscordClientIdChanged)
+                    .padding(9)
+                    .size(10),
+                row![
+                    quiet_button("Сохранить ID", Message::SaveDiscordClientId),
+                    choice_button("Включить", app.data.settings.discord_rpc_enabled, Message::ToggleDiscordRpc(true)),
+                    choice_button("Выключить", !app.data.settings.discord_rpc_enabled, Message::ToggleDiscordRpc(false)),
+                    Space::new().width(Length::Fill),
+                    text(app.discord_rpc_status.clone()).size(8).color(MUTED),
+                ]
+                .spacing(7)
+                .align_y(Alignment::Center),
+            ]
+            .spacing(8)
+            .into(),
+        ),
+        preference_panel(
+            "ОБНОВЛЕНИЯ",
+            "Проверяй новые изменения и управляй показом журнала в разделе «Новости». До публикации release-архивов обновление доступно через GitHub.",
+            column![
+                row![
+                    choice_button(
+                        "Показывать журнал в новостях",
+                        app.data.settings.show_update_notes,
+                        Message::ToggleUpdateNotes(!app.data.settings.show_update_notes),
+                    ),
+                    Space::new().width(Length::Fill),
+                    primary_button("Проверить обновления", Message::CheckUpdates),
+                    quiet_button("GitHub Releases", Message::OpenGithubReleases),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
+                update_notes_panel(app),
+            ]
+            .spacing(8)
+            .into(),
+        ),
         container(
             column![
                 row![
