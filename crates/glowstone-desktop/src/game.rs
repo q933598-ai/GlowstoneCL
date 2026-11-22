@@ -178,7 +178,9 @@ pub async fn available_versions(platform: GamePlatform) -> Result<Vec<VersionCho
                     "snapshot" => "Snapshot",
                     "old_beta" => "Старая Beta",
                     "old_alpha" => "Старая Alpha / Classic",
-                    _ => continue,
+                    // Keep future Mojang version types visible instead of silently
+                    // dropping them from the launcher catalogue.
+                    other => other,
                 };
                 versions.push(VersionChoice {
                     id: entry.id.clone(),
