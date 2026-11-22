@@ -18,6 +18,8 @@ pub enum InstanceState {
 pub struct GameInstance {
     pub id: InstanceId,
     pub name: String,
+    #[serde(default)]
+    pub description: String,
     pub platform: GamePlatform,
     pub game_version: String,
     pub loader: LoaderKind,
@@ -86,6 +88,7 @@ mod tests {
         GameInstance {
             id: InstanceId("123e4567-e89b-12d3-a456-426614174000".to_owned()),
             name: "Test".to_owned(),
+            description: String::new(),
             platform,
             game_version: "1.20.1".to_owned(),
             loader,
