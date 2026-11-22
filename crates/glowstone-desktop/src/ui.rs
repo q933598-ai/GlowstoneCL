@@ -2199,8 +2199,8 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 Err(error) => {
                     // Keep the user's preference enabled. Discord may simply be closed;
                     // the periodic retry will reconnect when its local IPC becomes available.
-                    app.discord_rpc_status = "Нет подключения · повторная попытка через 15 секунд".to_owned();
-                    let _ = store::save(&app.data);
+                    app.discord_rpc_status = format!("Ошибка: {}", error.chars().take(84).collect::<String>());
+                    app.discord_diagnostics = crate::discord::diagnostics();
                     app.notice = Some(error);
                 }
             }
@@ -2261,7 +2261,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         }
         Message::OpenGithubReleases => {
             app.notice = Some(match webbrowser::open("https://github.com/q933598-ai/GlowstoneCL/releases") {
-                Ok(()) => "Открываю страницу релизов GlowstoneCL.".to_owned(),
+                Ok(()) => "Открываю GitHub Releases. Если бинарного релиза нет, новую сборку пока нужно скачать/собрать вручную: автоматическая замена исполняемого файла ещё не реализована.".to_owned(),
                 Err(error) => format!("Не удалось открыть страницу релизов: {error}"),
             });
         }
@@ -2276,7 +2276,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 .rem_euclid(std::f32::consts::TAU);
         }
         Message::UiAnimationTick => {
-            app.page_transition_alpha = (app.page_transition_alpha - 0.06).max(0.0);
+            app.page_transition_alpha = (app.page_transition_alpha - 0.03).max(0.0);
         }
         Message::HoverButton => {
             if app.data.settings.hover_sounds_enabled {
@@ -3965,9 +3965,9 @@ fn instance_card(instance: &GameInstance, selected: bool) -> Element<'static, Me
             column![
                 text(instance.name.clone()).size(12).color(TEXT),
                 if instance.description.trim().is_empty() {
-                    text(format!("{} · {} · {}", platform, instance.game_version, loader_label(instance.loader))).size(9).color(MUTED)
+                    Space::new().height(0).into()
                 } else {
-                    text(instance.description.clone()).size(8).color(SUBTLE)
+                    text(instance.description.clone()).size(8).color(SUBTLE).into()
                 },
                 text(format!("{} · {} · {}", platform, instance.game_version, loader_label(instance.loader)))
                     .size(9)
@@ -5030,7 +5030,7 @@ fn settings_page(app: &App) -> Element<'_, Message> {
         ),
         preference_panel(
             "DISCORD RICH PRESENCE",
-            "Показывает статус GlowstoneCL в Discord. Нужен Application ID из Discord Developer Portal и запущенный Discord-клиент.",
+            "Нужен Application ID из Discord Developer Portal, запущенный desktop Discord и включённое отображение активности в настройках Discord. Веб-версия Discord не поддерживает Rich Presence.",
             column![
                 text_input("Discord Application ID", &app.data.settings.discord_client_id)
                     .on_input(Message::DiscordClientIdChanged)
