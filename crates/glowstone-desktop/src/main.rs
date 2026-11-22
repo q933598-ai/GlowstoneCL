@@ -27,6 +27,25 @@ fn main() -> iced::Result {
 }
 
 #[cfg(target_os = "linux")]
+static CHILD_DISPLAY_ENV: std::sync::OnceLock<
+    Vec<(std::ffi::OsString, std::ffi::OsString)>,
+> = std::sync::OnceLock::new();
+
+/// Restore display variables removed to force the launcher's own Winit backend.
+/// This is applied to game processes only; the launcher's process environment
+/// remains unchanged after startup so it cannot leak the forced backend into games.
+#[cfg(target_os = "linux")]
+pub(crate) fn restore_child_display_environment(
+    command: &mut tokio::process::Command,
+) {
+    if let Some(variables) = CHILD_DISPLAY_ENV.get() {
+        for (name, value) in variables {
+            command.env(name, value);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn apply_linux_backend_override() {
     use std::env;
 
@@ -40,17 +59,28 @@ fn apply_linux_backend_override() {
                 .find_map(|arg| arg.strip_prefix("--backend="))
         });
 
+    let mut child_display_env = Vec::new();
     match backend {
         Some("wayland") => {
+            if let Some(display) = env::var_os("DISPLAY") {
+                child_display_env.push((std::ffi::OsString::from("DISPLAY"), display));
+            }
             // SAFETY: this runs before Iced/Winit creates worker threads.
+            // The original value is restored only on the game child process.
             unsafe { env::remove_var("DISPLAY") };
         }
         Some("x11") => {
+            if let Some(display) = env::var_os("WAYLAND_DISPLAY") {
+                child_display_env.push((std::ffi::OsString::from("WAYLAND_DISPLAY"), display));
+            }
             // SAFETY: this runs before Iced/Winit creates worker threads.
+            // The original value is restored only on the game child process.
             unsafe { env::remove_var("WAYLAND_DISPLAY") };
         }
         _ => {}
     }
+
+    let _ = CHILD_DISPLAY_ENV.set(child_display_env);
 }
 
 #[cfg(not(target_os = "linux"))]
