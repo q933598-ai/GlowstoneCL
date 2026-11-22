@@ -190,6 +190,7 @@ pub enum Message {
     DiscordClientIdChanged(String),
     SaveDiscordClientId,
     ToggleDiscordRpc(bool),
+    RetryDiscordRpc,
     DiscordRpcUpdated(Result<String, String>),
     ToggleUpdateNotes(bool),
     CheckUpdates,
@@ -1999,6 +2000,11 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 return discord_rpc_task(true, app.data.settings.discord_client_id.clone());
             }
         }
+        Message::RetryDiscordRpc => {
+            if app.data.settings.discord_rpc_enabled {
+                return discord_rpc_task(true, app.data.settings.discord_client_id.clone());
+            }
+        }
         Message::ToggleDiscordRpc(enabled) => {
             app.data.settings.discord_rpc_enabled = enabled;
             if let Err(error) = store::save(&app.data) {
@@ -2020,8 +2026,9 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     }
                 }
                 Err(error) => {
-                    app.data.settings.discord_rpc_enabled = false;
-                    app.discord_rpc_status = "Не подключён".to_owned();
+                    // Keep the user's preference enabled. Discord may simply be closed;
+                    // the periodic retry will reconnect when its local IPC becomes available.
+                    app.discord_rpc_status = "Нет подключения · повторная попытка через 15 секунд".to_owned();
                     let _ = store::save(&app.data);
                     app.notice = Some(error);
                 }
@@ -2092,6 +2099,15 @@ pub fn subscription(app: &App) -> iced::Subscription<Message> {
         subscriptions.push(
             iced::time::every(std::time::Duration::from_millis(110))
                 .map(|_| Message::WardrobeAnimationTick),
+        );
+    }
+
+    if app.data.settings.discord_rpc_enabled
+        && app.discord_rpc_status != "Discord Rich Presence подключён."
+    {
+        subscriptions.push(
+            iced::time::every(std::time::Duration::from_secs(15))
+                .map(|_| Message::RetryDiscordRpc),
         );
     }
 
