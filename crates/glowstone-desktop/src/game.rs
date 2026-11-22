@@ -751,31 +751,48 @@ async fn launch_java(
         push_launch_log(&log, format!("Предупреждение: не удалось сохранить историю запусков: {error}"));
         eprintln!("[GlowstoneCL] Не удалось сохранить историю запусков: {error}");
     }
-    push_launch_log(&log, "Minecraft Java запущен. Читаю logs/latest.log…");
+    push_launch_log(&log, "Minecraft Java запущен. Читаю новые строки logs/latest.log…");
     let game_log_path = store::instance_directory(&instance.id.0)?.join("logs").join("latest.log");
-    let mut last_log_len = 0usize;
-    let mut log_poll = tokio::time::interval(std::time::Duration::from_millis(400));
+    // Keep an open file handle and seek to the last byte read. Reading the entire
+    // growing log every few hundred milliseconds made the I/O cost grow throughout
+    // long play sessions and could compete with the game on slower drives.
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    use std::io::SeekFrom;
+    let mut game_log_file = tokio::fs::File::open(&game_log_path).await.ok();
+    let mut last_log_len = 0u64;
+    let mut log_poll = tokio::time::interval(std::time::Duration::from_millis(1_000));
     let status = loop {
         tokio::select! {
             result = child.wait() => {
                 break result.map_err(|error| format!("Ошибка ожидания Minecraft Java: {error}"))?;
             }
             _ = log_poll.tick() => {
-                if let Ok(bytes) = tokio::fs::read(&game_log_path).await {
-                    if bytes.len() < last_log_len {
-                        last_log_len = 0;
-                    }
-                    if bytes.len() > last_log_len {
-                        let start = if bytes.len().saturating_sub(last_log_len) > 1_000_000 {
-                            bytes.len() - 1_000_000
-                        } else {
-                            last_log_len
-                        };
-                        let appended = String::from_utf8_lossy(&bytes[start..]);
-                        for line in appended.lines() {
-                            push_launch_log(&log, format!("[Minecraft] {line}"));
+                if game_log_file.is_none() {
+                    game_log_file = tokio::fs::File::open(&game_log_path).await.ok();
+                }
+                if let Some(file) = game_log_file.as_mut() {
+                    if let Ok(metadata) = file.metadata().await {
+                        let current_len = metadata.len();
+                        if current_len < last_log_len {
+                            // latest.log was truncated/rotated; start reading the new contents.
+                            last_log_len = 0;
                         }
-                        last_log_len = bytes.len();
+                        if current_len > last_log_len {
+                            if file.seek(SeekFrom::Start(last_log_len)).await.is_ok() {
+                                let read_len = (current_len - last_log_len).min(256 * 1024) as usize;
+                                let mut appended = vec![0u8; read_len];
+                                match file.read(&mut appended).await {
+                                    Ok(read) if read > 0 => {
+                                        appended.truncate(read);
+                                        last_log_len += read as u64;
+                                        for line in String::from_utf8_lossy(&appended).lines() {
+                                            push_launch_log(&log, format!("[Minecraft] {line}"));
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
                     }
                 }
             }
