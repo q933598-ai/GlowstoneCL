@@ -78,7 +78,13 @@ pub struct AppSettings {
     pub discord_rpc_enabled: bool,
     pub discord_client_id: String,
     pub show_update_notes: bool,
+    #[serde(default = "default_true")]
+    pub animations_enabled: bool,
+    pub hover_sounds_enabled: bool,
+    pub minimize_to_tray_on_launch: bool,
 }
+
+fn default_true() -> bool { true }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -107,6 +113,7 @@ pub struct InstanceSettings {
     pub resolution_height: String,
     /// KEY=VALUE per line. Do not store passwords or access tokens here.
     pub environment_variables: String,
+    pub minimize_to_tray_on_launch: bool,
 }
 
 impl Default for InstanceSettings {
@@ -120,6 +127,7 @@ impl Default for InstanceSettings {
             resolution_width: "1280".to_owned(),
             resolution_height: "720".to_owned(),
             environment_variables: String::new(),
+            minimize_to_tray_on_launch: false,
         }
     }
 }
@@ -406,6 +414,7 @@ fn state_path() -> Option<PathBuf> {
 
 pub fn create_instance(
     name: String,
+    description: String,
     version: String,
     platform: GamePlatform,
     loader: LoaderKind,
@@ -413,6 +422,7 @@ pub fn create_instance(
     let instance = GameInstance {
         id: InstanceId(Uuid::new_v4().to_string()),
         name,
+        description,
         platform,
         game_version: version,
         loader,
@@ -1109,6 +1119,7 @@ mod tests {
     fn loader_validation_is_platform_specific() {
         assert!(create_instance(
             "Fabric test".into(),
+            "A test profile".into(),
             "1.21.1".into(),
             GamePlatform::Java,
             LoaderKind::Fabric,
@@ -1116,6 +1127,7 @@ mod tests {
 
         assert!(create_instance(
             "Invalid Horizon".into(),
+            String::new(),
             "stable".into(),
             GamePlatform::Horizon,
             LoaderKind::Fabric,
