@@ -449,9 +449,7 @@ impl Default for App {
             updates: Vec::new(),
             updates_busy: false,
             updates_error: None,
-            discord_rpc_status: if crate::discord::application_id().is_empty() {
-                "Общий Application ID не встроен".to_owned()
-            } else if data.settings.discord_rpc_enabled {
+            discord_rpc_status: if data.settings.discord_rpc_enabled {
                 "Включён в настройках".to_owned()
             } else {
                 "Выключен".to_owned()
@@ -2219,9 +2217,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     app.discord_rpc_status = status.clone();
                     app.data.settings.discord_rpc_enabled = !status.contains("выключен");
                     if let Err(error) = store::save(&app.data) {
-                        app.notice = Some(format!("{status} Не удалось сохранить настройку: {error}"));
-                    } else {
-                        app.notice = Some(status);
+                        app.notice = Some(format!("Не удалось сохранить настройку Discord RPC: {error}"));
                     }
                 }
                 Err(error) => {
