@@ -39,22 +39,30 @@ pub fn poll_restore_request() -> bool {
 }
 
 fn build_icon() -> Result<Icon, String> {
-    let decoder = png::Decoder::new(std::io::Cursor::new(include_bytes!(
-        "../assets/icons/glowstone.png"
-    )));
-    let mut reader = decoder
-        .read_info()
-        .map_err(|error| format!("Не удалось прочитать иконку трея: {error}"))?;
-    let mut rgba = vec![0; reader.output_buffer_size()];
-    let info = reader
-        .next_frame(&mut rgba)
-        .map_err(|error| format!("Не удалось декодировать иконку трея: {error}"))?;
-
-    if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
-        return Err("Иконка трея должна быть PNG RGBA 8-bit".to_owned());
+    const SIZE: u32 = 32;
+    let mut rgba = vec![0u8; (SIZE * SIZE * 4) as usize];
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let edge = x < 3 || x > 28 || y < 3 || y > 28;
+            let face = if y < 12 {
+                [255, 221, 143, 255]
+            } else if x < 16 {
+                [224, 161, 82, 255]
+            } else {
+                [180, 112, 53, 255]
+            };
+            let highlight = x >= 8 && x <= 11 && y >= 7 && y <= 10;
+            let index = ((y * SIZE + x) * 4) as usize;
+            let color = if edge {
+                [83, 58, 38, 255]
+            } else if highlight {
+                [255, 245, 201, 255]
+            } else {
+                face
+            };
+            rgba[index..index + 4].copy_from_slice(&color);
+        }
     }
-
-    rgba.truncate(info.buffer_size());
-    Icon::from_rgba(rgba, info.width, info.height)
+    Icon::from_rgba(rgba, SIZE, SIZE)
         .map_err(|error| format!("Не удалось создать иконку трея: {error}"))
 }
