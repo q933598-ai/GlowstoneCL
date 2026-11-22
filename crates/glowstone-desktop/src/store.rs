@@ -152,13 +152,16 @@ impl InstanceSettings {
 
     pub fn environment_entries(&self) -> Result<Vec<(String, String)>, String> {
         let mut entries = Vec::new();
-        for (index, line) in self.environment_variables.lines().enumerate() {
+        for (index, line) in self.environment_variables
+            .split(|character| character == '\n' || character == ';')
+            .enumerate()
+        {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
             let (key, value) = line.split_once('=').ok_or_else(|| {
-                format!("Переменная окружения в строке {} должна иметь формат KEY=VALUE.", index + 1)
+                format!("Переменная окружения в записи {} должна иметь формат KEY=VALUE.", index + 1)
             })?;
             let valid_key = !key.is_empty()
                 && key.bytes().enumerate().all(|(i, byte)| {
@@ -176,12 +179,14 @@ impl InstanceSettings {
 
     pub fn jvm_argument_list(&self) -> Result<Vec<String>, String> {
         validate_argument_lines(&self.jvm_args, "JVM")?;
-        Ok(self.jvm_args.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned).collect())
+        Ok(self.jvm_args.split(|character| character == '\n' || character == ';')
+            .map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned).collect())
     }
 
     pub fn game_argument_list(&self) -> Result<Vec<String>, String> {
         validate_argument_lines(&self.game_args, "игровые")?;
-        Ok(self.game_args.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned).collect())
+        Ok(self.game_args.split(|character| character == '\n' || character == ';')
+            .map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned).collect())
     }
 
     pub fn resolution(&self) -> Result<Option<(u32, u32)>, String> {
