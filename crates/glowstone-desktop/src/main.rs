@@ -24,7 +24,11 @@ fn main() -> iced::Result {
         .default_font(iced::Font::with_name("Monocraft"))
         .window_size(iced::Size::new(1600.0, 900.0))
         .centered()
-        .run()
+        .run_with(|| {
+            let app = ui::App::default();
+            let startup = ui::initial_task(&app);
+            (app, startup)
+        })
 }
 
 #[cfg(target_os = "linux")]
