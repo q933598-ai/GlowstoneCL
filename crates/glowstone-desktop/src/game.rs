@@ -1540,7 +1540,7 @@ struct OfflineMinecraftSource {
 fn find_offline_minecraft_source(version: &str) -> Result<OfflineMinecraftSource, String> {
     let base = directories::BaseDirs::new()
         .ok_or_else(|| "Не удалось определить домашний каталог пользователя.".to_owned())?;
-    let home = base.home_dir();
+    let _home = base.home_dir();
     let mut candidates: Vec<(PathBuf, bool)> = Vec::new();
 
     if let Some(path) = std::env::var_os("GLOWSTONE_MINECRAFT_DIR") {
