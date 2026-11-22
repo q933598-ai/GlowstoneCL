@@ -160,6 +160,7 @@ pub enum Message {
     PickBackground,
     BackgroundPicked(Result<Option<String>, String>),
     ResetBackground,
+    SetBackgroundPreset(String),
     ToggleTelemetry(bool),
     SetLanguage(String),
     DiscordClientIdChanged(String),
@@ -229,6 +230,7 @@ pub struct App {
     recent_plays: Vec<store::RecentPlay>,
     selected_news: Option<usize>,
     background: Option<image::Handle>,
+    background_presets: Vec<PathBuf>,
     launch_log: game::LaunchLog,
     launch_output: Vec<String>,
     launch_console_open: bool,
@@ -240,12 +242,46 @@ pub struct App {
     discord_rpc_status: String,
 }
 
+fn background_presets_dir() -> PathBuf {
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(parent) = executable.parent() {
+            let bundled = parent.join("assets").join("backgrounds");
+            if bundled.is_dir() {
+                return bundled;
+            }
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("assets")
+        .join("backgrounds")
+}
+
+fn load_background_presets() -> Vec<PathBuf> {
+    let directory = background_presets_dir();
+    std::fs::read_dir(directory)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path.extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| {
+                        matches!(extension.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "webp")
+                    })
+        })
+        .collect()
+}
+
 impl Default for App {
     fn default() -> Self {
         let data = store::load();
         let background = data.settings.background_image.as_ref()
             .filter(|path| std::path::Path::new(path).is_file())
             .map(image::Handle::from_path);
+        let background_presets = load_background_presets();
         let wardrobe_account_id = data.settings.selected_account_id.as_ref()
             .and_then(|id| data.accounts.iter().find(|account| &account.id == id))
             .map(|account| account.id.clone())
@@ -318,6 +354,7 @@ impl Default for App {
             recent_plays: store::load_recent_plays(),
             selected_news: None,
             background,
+            background_presets,
             launch_log: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             launch_output: Vec::new(),
             launch_console_open: false,
@@ -1627,6 +1664,15 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             app.notice = store::save(&app.data).err()
                 .map(|error| format!("Фон сброшен, но настройки не сохранились: {error}"))
                 .or_else(|| Some("Возвращён стандартный тёмный фон GlowstoneCL.".to_owned()));
+        }
+        Message::SetBackgroundPreset(path) => {
+            if std::path::Path::new(&path).is_file() {
+                app.data.settings.background_image = Some(path.clone());
+                app.background = Some(image::Handle::from_path(path));
+                app.notice = store::save(&app.data).err()
+                    .map(|error| format!("Обои выбраны, но настройки не сохранились: {error}"))
+                    .or_else(|| Some("Предустановленные обои применены.".to_owned()));
+            }
         }
         Message::ToggleTelemetry(enabled) => {
             app.data.settings.telemetry_enabled = enabled;
@@ -3862,6 +3908,58 @@ fn preference_panel<'a>(title: &'static str, description: &'static str, content:
     .into()
 }
 
+fn background_preferences(app: &App) -> Element<'_, Message> {
+    let mut gallery = column![].spacing(7);
+    if app.background_presets.is_empty() {
+        gallery = gallery.push(
+            text("Пока нет встроенных обоев. Добавь PNG/JPG/WebP в assets/backgrounds — они появятся здесь после перезапуска.")
+                .size(8)
+                .color(SUBTLE),
+        );
+    } else {
+        let mut choices = row![].spacing(7).wrap();
+        for path in &app.background_presets {
+            let label = path.file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Wallpaper")
+                .to_owned();
+            choices = choices.push(
+                button(text(label).size(8).color(TEXT))
+                    .on_press(Message::SetBackgroundPreset(path.to_string_lossy().into_owned()))
+                    .padding([8, 11])
+                    .style(|theme, status| {
+                        let mut style = button::secondary(theme, status);
+                        style.background = Some(Color::from_rgba(0.92, 0.94, 0.98, 0.08).into());
+                        style.text_color = TEXT;
+                        style.border = Border::default().rounded(10).width(1).color(EDGE);
+                        style
+                    }),
+            );
+        }
+        gallery = gallery.push(choices);
+    }
+
+    preference_panel(
+        "ФОН И ОБОИ",
+        "Выбери собственное изображение или один из встроенных пресетов. Предустановленные обои загружаются из assets/backgrounds.",
+        column![
+            row![
+                primary_button("Выбрать изображение", Message::PickBackground),
+                quiet_button("Сбросить фон", Message::ResetBackground),
+            ]
+            .spacing(8),
+            if let Some(path) = app.data.settings.background_image.as_ref() {
+                text(format!("Текущий фон: {path}")).size(8).color(SUBTLE)
+            } else {
+                text("Текущий фон: стандартный GlowstoneCL").size(8).color(SUBTLE)
+            },
+            gallery,
+        ]
+        .spacing(8)
+        .into(),
+    )
+}
+
 fn settings_page(app: &App) -> Element<'_, Message> {
     let data_path = if cfg!(target_os = "linux") {
         "~/.local/share/GlowstoneCL/state.json"
@@ -3874,16 +3972,7 @@ fn settings_page(app: &App) -> Element<'_, Message> {
         settings_card("LINUX DISPLAY", "Нативный Wayland и X11", "GlowstoneCL поддерживает оба backend. В Wayland-сессии можно запускать приложение напрямую через Wayland без XWayland."),
         settings_card("ХРАНЕНИЕ", "Профили и сборки", data_path),
         settings_card("БЕЗОПАСНОСТЬ", "Microsoft refresh token", "Токены сохраняются через системное хранилище паролей. Если Secret Service недоступен, приложение покажет предупреждение."),
-        preference_panel(
-            "ФОН И ОБОИ",
-            "Выбери собственное изображение. Предустановленные обои будут автоматически появляться из assets/backgrounds после добавления файлов проекта.",
-            row![
-                primary_button("Выбрать изображение", Message::PickBackground),
-                quiet_button("Сбросить фон", Message::ResetBackground),
-            ]
-            .spacing(8)
-            .into(),
-        ),
+        background_preferences(app),
         preference_panel(
             "ЯЗЫК",
             "Выбор сохраняется в профиле приложения. Сейчас доступны русская и английская локали; перевод отдельных экранов ещё расширяется.",
