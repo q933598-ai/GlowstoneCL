@@ -1981,6 +1981,10 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             app.wardrobe_walk_phase = (app.wardrobe_walk_phase + 0.24)
                 .rem_euclid(std::f32::consts::TAU);
         }
+        Message::UiAnimationTick => {
+            app.animation_phase = (app.animation_phase + 0.035)
+                .rem_euclid(std::f32::consts::TAU);
+        }
         Message::OpenRepository => {
             app.notice = Some(match webbrowser::open("https://github.com/q933598-ai/GlowstoneCL") {
                 Ok(()) => "Открываю репозиторий GlowstoneCL на GitHub.".to_owned(),
@@ -1995,6 +1999,10 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
 
 pub fn subscription(app: &App) -> iced::Subscription<Message> {
     let mut subscriptions = Vec::new();
+    subscriptions.push(
+        iced::time::every(std::time::Duration::from_millis(50))
+            .map(|_| Message::UiAnimationTick),
+    );
 
     if app.page == Page::Wardrobe && app.wardrobe_active_skin_id.is_some() {
         subscriptions.push(
@@ -2049,7 +2057,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .content_fit(ContentFit::Cover)
             .into()
     } else {
-        canvas(GlowBackdrop)
+        canvas(GlowBackdrop { phase: app.animation_phase })
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
@@ -2089,7 +2097,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct GlowBackdrop;
+struct GlowBackdrop {
+    phase: f32,
+}
 
 impl<Message> canvas::Program<Message> for GlowBackdrop {
     type State = ();
@@ -2105,21 +2115,23 @@ impl<Message> canvas::Program<Message> for GlowBackdrop {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let background = canvas::Path::rectangle(iced::Point::ORIGIN, bounds.size());
         frame.fill(&background, BG);
+        let drift = self.phase.sin();
+        let orbit = self.phase.cos();
         draw_glow(
             &mut frame,
-            iced::Point::new(bounds.width * 0.72, bounds.height * 0.12),
+            iced::Point::new(bounds.width * (0.72 + drift * 0.035), bounds.height * (0.12 + orbit * 0.025)),
             440.0,
             Color::from_rgb8(45, 49, 57),
         );
         draw_glow(
             &mut frame,
-            iced::Point::new(bounds.width * 0.42, bounds.height * 0.95),
+            iced::Point::new(bounds.width * (0.42 + orbit * 0.04), bounds.height * (0.95 - drift * 0.025)),
             360.0,
             Color::from_rgb8(38, 42, 50),
         );
         draw_glow(
             &mut frame,
-            iced::Point::new(bounds.width * 0.98, bounds.height * 0.72),
+            iced::Point::new(bounds.width * (0.98 - drift * 0.03), bounds.height * (0.72 + orbit * 0.03)),
             280.0,
             Color::from_rgb8(48, 43, 37),
         );
@@ -3508,7 +3520,7 @@ fn instance_settings_page(app: &App) -> Element<'_, Message> {
         &[LoaderKind::HorizonContent, LoaderKind::HorizonNative]
     };
 
-    let mut loader_row = row![].spacing(7).wrap();
+    let mut loader_row = row![].spacing(7);
     for loader in loader_choices {
         loader_row = loader_row.push(loader_button(*loader, app.instance_settings_loader));
     }
