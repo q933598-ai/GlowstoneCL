@@ -435,6 +435,7 @@ fn start_catalog_search(app: &mut App, instance: GameInstance) -> iced::Task<Mes
 
     match instance.platform {
         GamePlatform::Java => {
+            app.local_mod_files = mods::local_files(&target_id).unwrap_or_default();
             app.mod_source = ModSource::Modrinth;
             app.curseforge_installed_mods = curseforge::installed(&target_id).unwrap_or_default();
             app.curseforge_mod_results.clear();
@@ -518,8 +519,9 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             }
             if page == Page::News {
                 app.selected_news = None;
-                if app.data.settings.show_update_notes && app.updates.is_empty() && !app.updates_busy {
+                if !app.updates_busy {
                     app.updates_busy = true;
+                    app.updates_error = None;
                     return iced::Task::perform(updates::fetch_recent_changes(), Message::UpdatesLoaded);
                 }
             }
