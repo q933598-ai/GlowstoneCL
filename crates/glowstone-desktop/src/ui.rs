@@ -1877,6 +1877,7 @@ fn draw_glow(frame: &mut canvas::Frame, center: iced::Point, radius: f32, color:
 }
 
 fn sidebar(app: &App) -> Element<'_, Message> {
+    let english = app.data.settings.language == "en";
     let brand = container(
         row![
             container(icon("glowstone", ORANGE, 25.0))
@@ -1896,33 +1897,33 @@ fn sidebar(app: &App) -> Element<'_, Message> {
     )
     .padding(12)
     .width(Length::Fill)
-    .style(|_| glass_style(Color::from_rgba(1.0, 1.0, 1.0, 0.72), EDGE));
+    .style(|_| glass_style(Color::from_rgba(0.10, 0.12, 0.15, 0.92), EDGE));
 
     let library = column![
-        section_label("БИБЛИОТЕКА"),
-        nav_button("home", "Главная", Page::Home, app.page),
-        nav_button("instances", "Мои сборки", Page::Instances, app.page),
+        section_label(if english { "LIBRARY" } else { "БИБЛИОТЕКА" }),
+        nav_button("home", if english { "Home" } else { "Главная" }, Page::Home, app.page),
+        nav_button("instances", if english { "Instances" } else { "Мои сборки" }, Page::Instances, app.page),
     ]
     .spacing(6);
 
     let discover = column![
-        section_label("ОТКРЫТЬ"),
-        nav_button("puzzle", "Моды", Page::Catalog, app.page),
-        nav_button("package", "Модпаки", Page::Modpacks, app.page),
+        section_label(if english { "DISCOVER" } else { "ОТКРЫТЬ" }),
+        nav_button("puzzle", if english { "Mods" } else { "Моды" }, Page::Catalog, app.page),
+        nav_button("package", if english { "Modpacks" } else { "Модпаки" }, Page::Modpacks, app.page),
     ]
     .spacing(6);
 
     let system = column![
-        section_label("СИСТЕМА"),
-        nav_button("download", "Загрузки", Page::Downloads, app.page),
-        nav_button("user", "Аккаунты", Page::Accounts, app.page),
-        nav_button("shirt", "Гардероб", Page::Wardrobe, app.page),
-        nav_button("settings", "Настройки", Page::Settings, app.page),
+        section_label(if english { "SYSTEM" } else { "СИСТЕМА" }),
+        nav_button("download", if english { "Downloads" } else { "Загрузки" }, Page::Downloads, app.page),
+        nav_button("user", if english { "Accounts" } else { "Аккаунты" }, Page::Accounts, app.page),
+        nav_button("shirt", if english { "Wardrobe" } else { "Гардероб" }, Page::Wardrobe, app.page),
+        nav_button("settings", if english { "Settings" } else { "Настройки" }, Page::Settings, app.page),
     ]
     .spacing(6);
 
     let platforms = column![
-        section_label("ПЛАТФОРМЫ"),
+        section_label(if english { "PLATFORMS" } else { "ПЛАТФОРМЫ" }),
         platform_nav("minecraft", "Minecraft Java", PlatformChoice::Java, app.platform),
         platform_nav("horizon", "Minecraft Horizon", PlatformChoice::Horizon, app.platform),
         platform_nav("user", "Horizon Offline", PlatformChoice::HorizonOffline, app.platform),
@@ -1933,11 +1934,13 @@ fn sidebar(app: &App) -> Element<'_, Message> {
         .and_then(|id| app.data.accounts.iter().find(|account| &account.id == id));
     let current_account = selected_account
         .map(|account| account.name.as_str())
-        .unwrap_or("Гость");
+        .unwrap_or(if english { "Guest" } else { "Гость" });
     let profile_subtitle = if selected_account.is_some() {
-        "Активный аккаунт"
+        if english { "Active account" } else { "Активный аккаунт" }
     } else if app.data.accounts.is_empty() {
-        "Не авторизован"
+        if english { "Not signed in" } else { "Не авторизован" }
+    } else if english {
+        "Choose account"
     } else {
         "Выбери аккаунт"
     };
