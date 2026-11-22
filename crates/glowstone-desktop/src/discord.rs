@@ -45,9 +45,12 @@ pub fn set_presence(
         guard.application_id = None;
 
         let mut connected = DiscordIpcClient::new(application_id);
-        connected
-            .connect()
-            .map_err(|error| format!("Не удалось подключиться к Discord. Проверь, что Discord запущен: {error}"))?;
+        connected.connect().map_err(|error| {
+            format!(
+                "Не удалось подключиться к Discord IPC: {error}. {}",
+                diagnostics()
+            )
+        })?;
         guard.client = Some(connected);
         guard.application_id = Some(application_id.to_owned());
     }
@@ -92,6 +95,8 @@ fn truncate(value: &str, max_chars: usize) -> String {
 pub fn diagnostics() -> String {
     #[cfg(unix)]
     {
+        use std::os::unix::fs::FileTypeExt;
+
         const ENV_KEYS: [&str; 4] = ["XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"];
         const APP_SUBPATHS: [&str; 7] = [
             "",
@@ -102,36 +107,59 @@ pub fn diagnostics() -> String {
             "snap.discord-canary/",
             "snap.discord/",
         ];
-        let mut checked = Vec::new();
+        let mut checked_dirs = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
         for key in ENV_KEYS {
             let Some(value) = std::env::var_os(key) else { continue };
             let base = std::path::PathBuf::from(value);
             if !base.is_dir() { continue; }
+            checked_dirs.push(format!("{key}={}", base.display()));
             for subpath in APP_SUBPATHS {
                 for index in 0..10 {
                     let path = base.join(subpath).join(format!("discord-ipc-{index}"));
-                    if path.exists() {
-                        return format!("IPC найден: {}. Проверь, что Discord и GlowstoneCL запущены от одного пользователя.", path.display());
+                    if !seen.insert(path.clone()) { continue; }
+                    if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+                        if metadata.file_type().is_socket() {
+                            return format!(
+                                "IPC-сокет найден: {}. Если соединение всё равно не устанавливается, проверь Application ID и запуск desktop Discord в той же сессии пользователя.",
+                                path.display()
+                            );
+                        }
                     }
                 }
             }
-            checked.push(format!("{key}={}", base.display()));
         }
-        if checked.is_empty() {
-            "Discord IPC не найден: XDG_RUNTIME_DIR/TMPDIR не заданы. Убедись, что Discord запущен в той же пользовательской сессии.".to_owned()
+
+        // The official Discord client can also use /tmp when no runtime directory is
+        // configured. Report it even though the library prefers environment paths.
+        for index in 0..10 {
+            let path = std::path::PathBuf::from(format!("/tmp/discord-ipc-{index}"));
+            if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+                if metadata.file_type().is_socket() {
+                    return format!(
+                        "IPC-сокет найден в /tmp: {}. Убедись, что один из TMPDIR/TMP/TEMP указывает на /tmp, иначе используемая RPC-библиотека может не найти этот путь.",
+                        path.display()
+                    );
+                }
+            }
+        }
+
+        if checked_dirs.is_empty() {
+            "Discord IPC не найден. Переменные XDG_RUNTIME_DIR/TMPDIR/TMP/TEMP не заданы или каталоги недоступны. Запусти desktop Discord в той же пользовательской сессии.".to_owned()
         } else {
             format!(
-                "Discord IPC не найден. Проверены: {}. Запусти Discord перед GlowstoneCL; Flatpak/Snap могут изолировать сокет.",
-                checked.join(" · ")
+                "Discord IPC-сокет не найден. Проверены: {}. Убедись, что открыт именно desktop Discord (не веб-версия) и что он запущен от того же пользователя.",
+                checked_dirs.join(" · ")
             )
         }
     }
     #[cfg(windows)]
     {
-        "Windows: Discord RPC использует локальный discord-ipc named pipe. Убедись, что Discord открыт и Application ID указан без пробелов.".to_owned()
+        "Windows: Discord RPC использует локальный discord-ipc named pipe. Убедись, что открыт desktop Discord, Application ID числовой, а лаунчер и Discord работают от одного пользователя.".to_owned()
     }
     #[cfg(target_os = "macos")]
     {
-        "macOS: Discord RPC использует локальный Unix socket. Убедись, что Discord открыт в том же пользовательском сеансе.".to_owned()
+        "macOS: Discord RPC использует локальный Unix socket. Убедись, что открыт desktop Discord в том же пользовательском сеансе, а Application ID скопирован из Discord Developer Portal.".to_owned()
     }
 }
