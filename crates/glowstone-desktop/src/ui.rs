@@ -5272,7 +5272,7 @@ fn curseforge_catalog_page(app: &App) -> Element<'_, Message> {
             installed = installed.push(
                 container(
                     row![
-                        mod_icon(item.icon_data.clone(), item.title.clone()),
+                        mod_icon_handle(app.mod_icon_handles.get(&item.file_name).cloned(), item.title.clone()),
                         column![
                             text(item.title.clone()).size(10).color(TEXT),
                             text(format!("{} · {} · {}", item.version, item.file_name, format_file_size(item.size))).size(8).color(MUTED),
@@ -5648,7 +5648,7 @@ fn java_catalog_page(app: &App) -> Element<'_, Message> {
             installed_list = installed_list.push(
                 container(
                     row![
-                        mod_icon(item.icon_data.clone(), item.title.clone()),
+                        mod_icon_handle(app.mod_icon_handles.get(&item.file_name).cloned(), item.title.clone()),
                         column![
                             text(item.title.clone()).size(10).color(TEXT),
                             text(format!("{} · {} · {}", item.version, item.file_name, format_file_size(item.size)))
