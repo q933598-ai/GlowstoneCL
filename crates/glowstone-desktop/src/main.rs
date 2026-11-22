@@ -9,6 +9,7 @@ mod modpacks;
 mod store;
 mod skin_preview;
 mod discord;
+mod updates;
 mod ui;
 
 fn main() -> iced::Result {
