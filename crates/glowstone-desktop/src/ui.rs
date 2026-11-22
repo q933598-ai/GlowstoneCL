@@ -2332,7 +2332,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         }
         Message::OpenDiscordDeveloperPortal => {
             app.notice = Some(match webbrowser::open("https://discord.com/developers/applications") {
-                Ok(()) => "Открываю Discord Developer Portal. Создай приложение и скопируй Application ID.".to_owned(),
+                Ok(()) => "Открываю Discord Developer Portal для управления общим приложением GlowstoneCL.".to_owned(),
                 Err(error) => format!("Не удалось открыть Discord Developer Portal: {error}"),
             });
         }
@@ -5150,7 +5150,7 @@ fn settings_page(app: &App) -> Element<'_, Message> {
                 .spacing(7)
                 .align_y(Alignment::Center),
                 row![
-                    quiet_button("Developer Portal", Message::OpenDiscordDeveloperPortal),
+                    quiet_button("Общее приложение", Message::OpenDiscordDeveloperPortal),
                     quiet_button("Проверить IPC", Message::CheckDiscordDiagnostics),
                 ].spacing(8).align_y(Alignment::Center),
                 text(app.discord_diagnostics.clone()).size(8).color(SUBTLE),
