@@ -1258,7 +1258,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         }
         Message::SelectInstance(id) => {
             if app.data.instances.iter().any(|instance| instance.id.0 == id) {
-                app.data.settings.selected_instance_id = Some(id);
+                app.data.settings.selected_instance_id = Some(id.clone());
                 app.notice = store::save(&app.data)
                     .err()
                     .map(|error| format!("Не удалось сохранить выбранную сборку: {error}"))
