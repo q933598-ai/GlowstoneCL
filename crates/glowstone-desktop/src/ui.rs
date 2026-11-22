@@ -5078,6 +5078,7 @@ fn background_preferences(app: &App) -> Element<'_, Message> {
 }
 
 fn settings_page(app: &App) -> Element<'_, Message> {
+    let discord_rpc_configured = !crate::discord::application_id().is_empty();
     let data_path = if cfg!(target_os = "linux") {
         "~/.local/share/GlowstoneCL/state.json"
     } else {
@@ -5133,8 +5134,16 @@ fn settings_page(app: &App) -> Element<'_, Message> {
             "GlowstoneCL будет использовать один общий Application ID, встроенный в сборку лаунчера. Каждый пользователь просто включает RPC — создавать собственное Discord-приложение и вводить ID не нужно. Нужен запущенный desktop Discord.",
             column![
                 row![
-                    choice_button("Включить", app.data.settings.discord_rpc_enabled, Message::ToggleDiscordRpc(true)),
-                    choice_button("Выключить", !app.data.settings.discord_rpc_enabled, Message::ToggleDiscordRpc(false)),
+                    choice_button(
+                        "Включить",
+                        discord_rpc_configured && app.data.settings.discord_rpc_enabled,
+                        Message::ToggleDiscordRpc(true),
+                    ),
+                    choice_button(
+                        "Выключить",
+                        !discord_rpc_configured || !app.data.settings.discord_rpc_enabled,
+                        Message::ToggleDiscordRpc(false),
+                    ),
                     Space::new().width(Length::Fill),
                     text(app.discord_rpc_status.clone()).size(8).color(MUTED),
                 ]
