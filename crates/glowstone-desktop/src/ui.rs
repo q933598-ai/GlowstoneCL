@@ -461,6 +461,9 @@ fn start_catalog_search(app: &mut App, instance: GameInstance) -> iced::Task<Mes
 }
 
 fn start_curseforge_search(app: &mut App) -> iced::Task<Message> {
+    if let Some(target_id) = app.mod_target_instance.as_deref() {
+        app.local_mod_files = mods::local_files(target_id).unwrap_or_default();
+    }
     let Some(target_id) = app.mod_target_instance.clone() else {
         app.mods_error = Some("Сначала выбери Java-сборку с загрузчиком.".to_owned());
         return iced::Task::none();
@@ -990,6 +993,8 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             match mods::remove_file(&instance_id, &file_name) {
                 Ok(()) => {
                     app.local_mod_files = mods::local_files(&instance_id).unwrap_or_default();
+                    app.installed_mods = mods::installed(&instance_id).unwrap_or_default();
+                    app.curseforge_installed_mods = curseforge::installed(&instance_id).unwrap_or_default();
                     app.notice = Some(format!("Мод {} удалён из сборки.", file_name));
                 }
                 Err(error) => app.notice = Some(error),
@@ -1858,6 +1863,11 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 app.selected_news = Some(index);
                 app.page = Page::News;
                 app.notice = None;
+                if !app.updates_busy {
+                    app.updates_busy = true;
+                    app.updates_error = None;
+                    return iced::Task::perform(updates::fetch_recent_changes(), Message::UpdatesLoaded);
+                }
             }
         }
         Message::RefreshRecentPlays => {
@@ -2236,6 +2246,7 @@ fn sidebar(app: &App) -> Element<'_, Message> {
         nav_button("download", if english { "Downloads" } else { "Загрузки" }, Page::Downloads, app.page),
         nav_button("user", if english { "Accounts" } else { "Аккаунты" }, Page::Accounts, app.page),
         nav_button("shirt", if english { "Wardrobe" } else { "Гардероб" }, Page::Wardrobe, app.page),
+        nav_button("newspaper", if english { "Updates" } else { "Новости и обновления" }, Page::News, app.page),
         nav_button("settings", if english { "Settings" } else { "Настройки" }, Page::Settings, app.page),
     ]
     .spacing(6);
