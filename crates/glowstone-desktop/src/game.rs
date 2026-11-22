@@ -1554,9 +1554,9 @@ fn find_offline_minecraft_source(version: &str) -> Result<OfflineMinecraftSource
     #[cfg(target_os = "linux")]
     {
         candidates.extend([
-            (home.join(".minecraft"), false),
+            (_home.join(".minecraft"), false),
             (base.data_local_dir().join("PrismLauncher"), true),
-            (home.join(".var/app/org.prismlauncher.PrismLauncher/data/PrismLauncher"), true),
+            (_home.join(".var/app/org.prismlauncher.PrismLauncher/data/PrismLauncher"), true),
             (base.data_local_dir().join("multimc"), true),
         ]);
     }
@@ -1571,7 +1571,7 @@ fn find_offline_minecraft_source(version: &str) -> Result<OfflineMinecraftSource
     }
     #[cfg(target_os = "macos")]
     {
-        let support = home.join("Library/Application Support");
+        let support = _home.join("Library/Application Support");
         candidates.push((support.join("minecraft"), false));
         candidates.push((support.join("PrismLauncher"), true));
         candidates.push((support.join("MultiMC"), true));
