@@ -57,6 +57,8 @@ pub fn set_presence(
         .ok_or_else(|| "Discord RPC не создал соединение.".to_owned())?
         .set_activity(
             activity::Activity::new()
+                .name("GlowstoneCL")
+                .activity_type(activity::ActivityType::Playing)
                 .details(truncate(details, 128))
                 .state(truncate(state, 128)),
         );
