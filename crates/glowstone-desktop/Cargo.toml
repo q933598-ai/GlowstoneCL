@@ -25,6 +25,7 @@ iced = { version = "0.14.0", default-features = false, features = [
     "advanced",
 ] }
 crust_core = "1.0.3"
+discord-rich-presence = "1.1.0"
 directories = "6.0"
 keyring = { version = "3.6", default-features = false, features = ["sync-secret-service", "windows-native", "crypto-rust"] }
 md5 = "0.7"
