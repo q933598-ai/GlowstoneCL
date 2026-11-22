@@ -615,6 +615,9 @@ async fn launch_java(
 ) -> Result<LaunchOutcome, String> {
     push_launch_log(&log, format!("Подготовка Minecraft Java {} ({:?})…", instance.game_version, instance.loader));
     let version = java_version_selector(&instance.game_version);
+    let instance_settings = store::load_instance_settings(&instance.id.0)?;
+    instance_settings.validate()?;
+    let instance_environment = instance_settings.environment_entries()?;
     let mut skin_notice = None;
     let mut options = JavaLaunchOptions::new(data_root.clone(), version);
 
@@ -647,7 +650,19 @@ async fn launch_java(
         options.loader.build = loader_version.to_owned();
     }
     options.download_concurrency = 10;
-    options.memory.max = "4G".to_owned();
+    options.memory.min = instance_settings.memory_min.trim().to_owned();
+    options.memory.max = instance_settings.memory_max.trim().to_owned();
+    options.java.path = if instance_settings.java_path.trim().is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(instance_settings.java_path.trim()))
+    };
+    options.jvm_args.extend(instance_settings.jvm_argument_list()?);
+    options.game_args.extend(instance_settings.game_argument_list()?);
+    if let Some((width, height)) = instance_settings.resolution()? {
+        options.screen.width = Some(width);
+        options.screen.height = Some(height);
+    }
 
     match instance.loader {
         LoaderKind::Vanilla => {}
@@ -718,7 +733,8 @@ async fn launch_java(
         .current_dir(&plan.working_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::inherit())
+        .envs(instance_environment);
     #[cfg(target_os = "linux")]
     crate::restore_child_display_environment(&mut child_command);
 
