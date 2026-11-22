@@ -689,7 +689,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     let id = instance.id.0.clone();
                     app.data.instances.retain(|existing| existing.id.0 != id);
                     app.data.instances.push(instance);
-                    app.data.settings.selected_instance_id = Some(id);
+                    app.data.settings.selected_instance_id = Some(id.clone());
                     app.platform = PlatformChoice::Java;
                     app.loader = app.data.instances.last().map(|instance| instance.loader).unwrap_or(LoaderKind::Vanilla);
                     app.page = Page::Instances;
@@ -3878,6 +3878,7 @@ fn instance_settings_page(app: &App) -> Element<'_, Message> {
         screenshots = screenshots.push(text("Скриншоты пока не найдены.").size(9).color(MUTED));
     } else {
         let screenshot_dir = store::instance_directory(&id)
+            .ok()
             .map(|directory| directory.join("screenshots"));
         for item in &app.instance_screenshots {
             let thumbnail: Element<'_, Message> = if let Some(directory) = &screenshot_dir {
