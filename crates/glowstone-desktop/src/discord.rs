@@ -10,6 +10,12 @@ struct RpcState {
 
 static CLIENT: OnceLock<Mutex<RpcState>> = OnceLock::new();
 
+/// One public Discord application ID is embedded into each GlowstoneCL build.
+/// Set GLOWSTONE_DISCORD_APPLICATION_ID when compiling release packages.
+pub fn application_id() -> &'static str {
+    option_env!("GLOWSTONE_DISCORD_APPLICATION_ID").unwrap_or("")
+}
+
 /// Updates Discord Rich Presence, reconnecting automatically if the Application ID changes.
 /// The Discord client is local IPC; this never sends account tokens or server addresses.
 pub fn set_presence(
