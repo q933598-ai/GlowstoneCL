@@ -476,16 +476,25 @@ fn start_catalog_search(app: &mut App, instance: GameInstance) -> iced::Task<Mes
 
     match instance.platform {
         GamePlatform::Java => {
-            app.local_mod_files = mods::local_files(&target_id).unwrap_or_default();
+            app.local_mod_files.clear();
+            app.installed_mods_visible = 24;
             app.mod_source = ModSource::Modrinth;
             app.curseforge_installed_mods = curseforge::installed(&target_id).unwrap_or_default();
             app.curseforge_mod_results.clear();
             app.horizon_installed_mods.clear();
             app.installed_mods = mods::installed(&target_id).unwrap_or_default();
-            iced::Task::perform(
-                mods::search(instance, app.search.clone()),
-                move |result| Message::ModsSearched(target_id, result),
-            )
+            let file_target = target_id.clone();
+            let search_target = target_id.clone();
+            iced::Task::batch(vec![
+                iced::Task::perform(
+                    mods::local_files_async(file_target.clone()),
+                    move |result| Message::LocalModFilesLoaded(file_target, result),
+                ),
+                iced::Task::perform(
+                    mods::search(instance, app.search.clone()),
+                    move |result| Message::ModsSearched(search_target, result),
+                ),
+            ])
         }
         GamePlatform::Horizon | GamePlatform::HorizonOffline => {
             app.mod_source = ModSource::Horizon;
@@ -502,9 +511,6 @@ fn start_catalog_search(app: &mut App, instance: GameInstance) -> iced::Task<Mes
 }
 
 fn start_curseforge_search(app: &mut App) -> iced::Task<Message> {
-    if let Some(target_id) = app.mod_target_instance.as_deref() {
-        app.local_mod_files = mods::local_files(target_id).unwrap_or_default();
-    }
     let Some(target_id) = app.mod_target_instance.clone() else {
         app.mods_error = Some("Сначала выбери Java-сборку с загрузчиком.".to_owned());
         return iced::Task::none();
@@ -531,10 +537,20 @@ fn start_curseforge_search(app: &mut App) -> iced::Task<Message> {
     app.mods_error = None;
     app.curseforge_mod_results.clear();
     app.curseforge_installed_mods = curseforge::installed(&target_id).unwrap_or_default();
-    iced::Task::perform(
-        curseforge::search(instance, app.search.clone(), api_key),
-        move |result| Message::CurseForgeModsSearched(target_id, result),
-    )
+    app.local_mod_files.clear();
+    app.installed_mods_visible = 24;
+    let file_target = target_id.clone();
+    let search_target = target_id.clone();
+    iced::Task::batch(vec![
+        iced::Task::perform(
+            mods::local_files_async(file_target.clone()),
+            move |result| Message::LocalModFilesLoaded(file_target, result),
+        ),
+        iced::Task::perform(
+            curseforge::search(instance, app.search.clone(), api_key),
+            move |result| Message::CurseForgeModsSearched(search_target, result),
+        ),
+    ])
 }
 
 fn discord_presence_task(
@@ -910,11 +926,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     Vec::new()
                 }
             };
-            app.local_mod_files = if instance.platform == GamePlatform::Java {
-                mods::local_files(&instance_id).unwrap_or_default()
-            } else {
-                Vec::new()
-            };
+            app.local_mod_files.clear();
             app.server_name_input.clear();
             app.server_address_input.clear();
             if app.data.settings.animations_enabled {
@@ -922,6 +934,12 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             }
             app.page = Page::InstanceSettings;
             let _ = store::save(&app.data);
+            if instance.platform == GamePlatform::Java {
+                return iced::Task::perform(
+                    mods::local_files_async(instance_id.clone()),
+                    move |result| Message::LocalModFilesLoaded(instance_id, result),
+                );
+            }
         }
         Message::SaveInstanceSettings => {
             let Some(instance_id) = app.instance_settings_id.clone() else {
@@ -1000,7 +1018,10 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     }
                 };
                 if app.data.instances.iter().any(|item| item.id.0 == instance_id && item.platform == GamePlatform::Java) {
-                    app.local_mod_files = mods::local_files(&instance_id).unwrap_or_default();
+                    return iced::Task::perform(
+                        mods::local_files_async(instance_id.clone()),
+                        move |result| Message::LocalModFilesLoaded(instance_id, result),
+                    );
                 }
             }
         }
@@ -1090,7 +1111,6 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             app.installed_mods_visible = app.installed_mods_visible.saturating_add(24);
         }
         Message::OpenInstanceMods(target_id) => {
-            app.local_mod_files = mods::local_files(&target_id).unwrap_or_default();
             let Some(instance) = app.data.instances.iter()
                 .find(|item| item.id.0 == target_id && supports_mod_catalog(item))
                 .cloned()
