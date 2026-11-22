@@ -14,7 +14,7 @@ The project targets **Windows and Linux**. On Linux, the desktop app supports na
 
 The `test/glowstonecl` branch includes:
 
-- a native Iced desktop interface with a light grey liquid-glass visual system, a three-column launcher dashboard, a custom glowstone-block SVG brand mark, and SVG icons;
+- a native Iced desktop interface with a dark graphite and warm amber liquid-glass visual system, a three-column launcher dashboard, a custom glowstone-block SVG brand mark, and SVG icons;
 - the bundled **Monocraft** pixel font (including Cyrillic), loaded directly by Iced on startup; its SIL Open Font License is included in `crates/glowstone-desktop/assets/fonts/Monocraft-OFL.txt`;
 - local instance creation, selection, isolated workspaces and safe deletion to a local trash directory;
 - **official Minecraft Java installation and launch** through CrustCore: Mojang version metadata, client files, libraries, assets and matching Java runtimes are downloaded as needed;
@@ -29,8 +29,14 @@ The `test/glowstonecl` branch includes:
 - Microsoft browser sign-in through CrustCore using the official Minecraft Launcher public client by default (optional custom Client ID), followed by Xbox Live, XSTS and Minecraft Services, including ownership / Game Pass checks;
 - Microsoft refresh-token storage in the operating system credential store, with session refresh before launching a game;
 - offline profiles for Java offline-mode play and the separate Horizon Offline fork;
-- a skin wardrobe for offline and Microsoft profiles, with per-profile PNG collections, current-skin sync for Microsoft accounts, official Minecraft Services upload, a mouse-rotatable 3D player, compact 3D previews for the other saved skins, and decoded-pixel deduplication so PNG re-encoding does not create duplicate Microsoft skins. Offline skins are applied directly by Horizon Offline. For ordinary Minecraft Java, GlowstoneCL uses the standalone [OfflineSkinInjector](https://github.com/NaivG/OfflineSkinInjector) Java agent: no Fabric/Forge skin mod is installed and no `mods/` folder entry is needed. Its upstream 0.1.2 JAR is downloaded on demand and checked against a pinned SHA-256 before launch. The injector works at runtime with supported authlib generations across Vanilla and mod-loader clients; the skin is client-side only;
+- a skin wardrobe for offline and Microsoft profiles, with per-profile PNG collections, current-skin sync for Microsoft accounts, official Minecraft Services upload, a mouse-rotatable 3D player, compact 3D previews for the other saved skins, and decoded-pixel deduplication so PNG re-encoding does not create duplicate Microsoft skins. The selected skin preview rotates by dragging with the mouse; miniature 3D previews are shown for saved skins. Offline skins are applied directly by Horizon Offline. For ordinary Minecraft Java, GlowstoneCL uses the standalone [OfflineSkinInjector](https://github.com/NaivG/OfflineSkinInjector) Java agent: no Fabric/Forge skin mod is installed and no `mods/` folder entry is needed. Its upstream 0.1.2 JAR is downloaded on demand and checked against a pinned SHA-256 before launch. The injector works at runtime with supported authlib generations across Vanilla and mod-loader clients; the skin is client-side only;
 - a Prism-style build library with a compact create action, a separate create form, context-click creation, and saved favourite profiles;
+- a centered live launch diagnostics window for Java and Horizon: CrustCore preparation events, Minecraft `logs/latest.log` tail, Horizon stdout/stderr, final exit status, and copyable error/full-log actions;
+- user-selectable wallpaper images, plus bundled preset discovery from `crates/glowstone-desktop/assets/backgrounds/` (the folder currently contains instructions and awaits artwork);
+- opt-in **local-only diagnostics**: selected launch errors can be stored in `diagnostics/errors.log` after basic token/path redaction; this build does not upload telemetry to a remote server;
+- optional Discord Rich Presence using a user-supplied Discord Application ID;
+- a GitHub commit changelog in Settings and News, with a setting to hide it; binary self-updating is not available until signed release assets are published;
+- a language selector for Russian and English; primary navigation/profile labels are translated, while full-screen translation remains in progress;
 - persistent Recent Play history for Java and Horizon launches, with quick relaunch actions;
 - a **CurseForge Java mod catalogue** for Forge, Fabric, NeoForge and Quilt. The official API key is saved only in the operating-system credential store; installed JARs are SHA-1 checked and tracked per instance;
 - a **Modrinth modpack catalogue and .mrpack installer**. Each import creates a new Java instance, validates pack paths, file sizes and hashes, extracts client overrides, and pins the loader build specified by the pack index.
