@@ -31,8 +31,16 @@ fn main() -> iced::Result {
     .theme(iced::Theme::Dark)
     .font(include_bytes!("../assets/fonts/Monocraft.ttf").as_slice())
     .default_font(iced::Font::with_name("Monocraft"))
-    .window_size(iced::Size::new(1600.0, 900.0))
-    .centered()
+    .window(iced::window::Settings {
+        size: iced::Size::new(1600.0, 900.0),
+        position: iced::window::Position::Centered,
+        icon: iced::window::icon::from_file_data(
+            include_bytes!("../assets/icons/glowstone.png"),
+            None,
+        )
+        .ok(),
+        ..Default::default()
+    })
     .run()
 }
 
