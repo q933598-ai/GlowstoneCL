@@ -411,6 +411,19 @@ fn start_curseforge_search(app: &mut App) -> iced::Task<Message> {
     )
 }
 
+fn discord_rpc_task(enabled: bool, client_id: String) -> iced::Task<Message> {
+    iced::Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                crate::discord::set_enabled(enabled, &client_id)
+            })
+            .await
+            .map_err(|error| format!("Задача Discord RPC завершилась с ошибкой: {error}"))?
+        },
+        Message::DiscordRpcUpdated,
+    )
+}
+
 pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
     match message {
         Message::Navigate(page) => {
