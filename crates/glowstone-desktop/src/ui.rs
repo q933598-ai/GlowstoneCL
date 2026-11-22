@@ -46,6 +46,7 @@ pub enum Page {
     Accounts,
     Wardrobe,
     Settings,
+    InstanceSettings,
     News,
 }
 
@@ -101,6 +102,27 @@ pub enum Message {
     SaveCurseForgeApiKey,
     ModTargetSelected(String),
     OpenInstanceMods(String),
+    OpenInstanceSettings(String),
+    SaveInstanceSettings,
+    InstanceMemoryMinChanged(String),
+    InstanceMemoryMaxChanged(String),
+    InstanceJavaPathChanged(String),
+    InstanceJvmArgsChanged(String),
+    InstanceGameArgsChanged(String),
+    InstanceResolutionWidthChanged(String),
+    InstanceResolutionHeightChanged(String),
+    InstanceEnvironmentChanged(String),
+    InstanceLoaderChanged(LoaderKind),
+    RefreshInstanceContent,
+    CreateWorld(String),
+    DeleteInstanceWorld(String, String),
+    DeleteInstanceScreenshot(String, String),
+    OpenInstanceFolder(String, String),
+    ServerNameChanged(String),
+    ServerAddressChanged(String),
+    AddServer,
+    RemoveServer(String, usize),
+    RemoveInstalledModFile(String, String),
     ModsSearched(String, Result<Vec<mods::ModProject>, String>),
     InstalledModIconsLoaded(String, Result<Vec<mods::InstalledMod>, String>),
     InstallMod(String),
@@ -173,6 +195,7 @@ pub enum Message {
     OpenGithubReleases,
     OpenUpdate(String),
     WardrobeAnimationTick,
+    UiAnimationTick,
     OpenRepository,
     Info(&'static str),
 }
@@ -240,6 +263,16 @@ pub struct App {
     updates_busy: bool,
     updates_error: Option<String>,
     discord_rpc_status: String,
+    instance_settings_id: Option<String>,
+    instance_settings: store::InstanceSettings,
+    instance_settings_loader: LoaderKind,
+    instance_worlds: Vec<store::LocalFileEntry>,
+    instance_screenshots: Vec<store::LocalFileEntry>,
+    instance_servers: Vec<crate::instance_tools::ServerEntry>,
+    server_name_input: String,
+    server_address_input: String,
+    local_mod_files: Vec<mods::InstalledModFile>,
+    animation_phase: f32,
 }
 
 fn background_presets_dir() -> PathBuf {
@@ -368,6 +401,16 @@ impl Default for App {
             } else {
                 "Выключен".to_owned()
             },
+            instance_settings_id: None,
+            instance_settings: store::InstanceSettings::default(),
+            instance_settings_loader: LoaderKind::Vanilla,
+            instance_worlds: Vec::new(),
+            instance_screenshots: Vec::new(),
+            instance_servers: Vec::new(),
+            server_name_input: String::new(),
+            server_address_input: String::new(),
+            local_mod_files: Vec::new(),
+            animation_phase: 0.0,
             data,
         }
     }
