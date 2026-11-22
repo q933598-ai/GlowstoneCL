@@ -1523,15 +1523,28 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
 }
 
 pub fn subscription(app: &App) -> iced::Subscription<Message> {
+    let mut subscriptions = Vec::new();
+
     if app.page == Page::Wardrobe && app.wardrobe_active_skin_id.is_some() {
-        iced::time::every(std::time::Duration::from_millis(110))
-            .map(|_| Message::WardrobeAnimationTick)
-    } else if app.launch_busy.is_some() {
-        iced::time::every(std::time::Duration::from_secs(1))
-            .map(|_| Message::RefreshRecentPlays)
-    } else {
-        iced::Subscription::none()
+        subscriptions.push(
+            iced::time::every(std::time::Duration::from_millis(110))
+                .map(|_| Message::WardrobeAnimationTick),
+        );
     }
+
+    if app.launch_console_open {
+        subscriptions.push(
+            iced::time::every(std::time::Duration::from_millis(250))
+                .map(|_| Message::RefreshLaunchLog),
+        );
+    } else if app.launch_busy.is_some() {
+        subscriptions.push(
+            iced::time::every(std::time::Duration::from_secs(1))
+                .map(|_| Message::RefreshRecentPlays),
+        );
+    }
+
+    iced::Subscription::batch(subscriptions)
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -1558,10 +1571,32 @@ pub fn view(app: &App) -> Element<'_, Message> {
     .spacing(14)
     .height(Length::Fill);
 
-    stack![
+    let backdrop: Element<'_, Message> = if let Some(background) = &app.background {
+        image::Image::new(background.clone())
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .content_fit(ContentFit::Cover)
+            .into()
+    } else {
         canvas(GlowBackdrop)
             .width(Length::Fill)
-            .height(Length::Fill),
+            .height(Length::Fill)
+            .into()
+    };
+    let image_tint: Element<'_, Message> = container(
+        Space::new().width(Length::Fill).height(Length::Fill),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(|_| container::Style {
+        background: Some(Color::from_rgba(0.025, 0.03, 0.045, 0.58).into()),
+        ..Default::default()
+    })
+    .into();
+
+    let base: Element<'_, Message> = stack![
+        backdrop,
+        image_tint,
         container(content)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -1570,7 +1605,16 @@ pub fn view(app: &App) -> Element<'_, Message> {
     .width(Length::Fill)
     .height(Length::Fill)
     .clip(true)
-    .into()
+    .into();
+
+    if app.launch_console_open {
+        stack![base, launch_debug_window(app)]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else {
+        base
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
