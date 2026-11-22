@@ -206,6 +206,42 @@ pub fn save(state: &PersistedState) -> Result<(), String> {
     Ok(())
 }
 
+/// Appends a privacy-minimised local diagnostic after the user explicitly opts in.
+/// No telemetry is sent over the network by this function.
+pub fn append_local_diagnostic(message: &str) -> Result<(), String> {
+    use std::io::Write as _;
+
+    let directory = app_data_dir()?.join("diagnostics");
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("Не удалось создать каталог диагностики: {error}"))?;
+    let path = directory.join("errors.log");
+    let home = std::env::var("HOME").ok();
+    let mut safe = message
+        .replace("Bearer ", "Bearer [redacted] ")
+        .replace("access_token=", "access_token=[redacted]")
+        .replace("refresh_token=", "refresh_token=[redacted]")
+        .replace("client_secret=", "client_secret=[redacted]");
+    if let Some(home) = home.as_deref().filter(|value| !value.is_empty()) {
+        safe = safe.replace(home, "~");
+    }
+    if safe.len() > 8_000 {
+        safe.truncate(8_000);
+        safe.push_str("… [truncated]");
+    }
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|error| format!("Не удалось открыть журнал диагностики: {error}"))?;
+    writeln!(file, "[{timestamp}] {} · {safe}", std::env::consts::OS)
+        .map_err(|error| format!("Не удалось записать диагностику: {error}"))
+}
+
 pub fn app_data_dir() -> Result<PathBuf, String> {
     let dirs = BaseDirs::new()
         .ok_or_else(|| "Не удалось определить каталог данных GlowstoneCL.".to_owned())?;
