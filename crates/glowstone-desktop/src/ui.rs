@@ -4568,6 +4568,93 @@ fn modpacks_page(app: &App) -> Element<'_, Message> {
     content.into()
 }
 
+fn launch_debug_window(app: &App) -> Element<'_, Message> {
+    let start = app.launch_output.len().saturating_sub(500);
+    let output = if app.launch_output.is_empty() {
+        "Ожидание событий запуска…".to_owned()
+    } else {
+        app.launch_output[start..].join("\n")
+    };
+
+    let error_banner: Element<'_, Message> = if let Some(error) = &app.launch_error {
+        container(
+            column![
+                text("ОШИБКА ЗАПУСКА").size(8).color(RED),
+                text(error.clone()).size(9).color(TEXT),
+                quiet_button("Скопировать ошибку", Message::CopyLaunchError),
+            ]
+            .spacing(7),
+        )
+        .padding(12)
+        .width(Length::Fill)
+        .style(|_| glass_style(Color::from_rgba(0.36, 0.10, 0.12, 0.34), EDGE_BRIGHT))
+        .into()
+    } else {
+        Space::new().height(0).into()
+    };
+
+    let close_action: Element<'_, Message> = if app.launch_busy.is_none() {
+        quiet_button("Закрыть", Message::CloseLaunchConsole)
+    } else {
+        status_chip("ЗАПУСК ИДЁТ", CYAN_DARK, CYAN)
+    };
+
+    let panel = container(
+        column![
+            row![
+                icon("loader", CYAN, 24.0),
+                column![
+                    text("LAUNCHING · GLOWSTONECL").size(13).color(TEXT),
+                    text(app.launch_status.clone()).size(9).color(MUTED),
+                ]
+                .spacing(4),
+                Space::new().width(Length::Fill),
+                close_action,
+            ]
+            .align_y(Alignment::Center)
+            .spacing(12),
+            error_banner,
+            container(
+                scrollable(text(output).size(8).color(Color::from_rgb8(206, 214, 224)))
+                    .height(Length::Fixed(365.0))
+                    .width(Length::Fill),
+            )
+            .padding(12)
+            .width(Length::Fill)
+            .style(|_| glass_style(Color::from_rgba(0.035, 0.045, 0.06, 0.96), EDGE)),
+            row![
+                text(format!("{} строк в буфере", app.launch_output.len())).size(8).color(SUBTLE),
+                Space::new().width(Length::Fill),
+                quiet_button("Скопировать весь лог", Message::CopyLaunchLog),
+            ]
+            .align_y(Alignment::Center),
+        ]
+        .spacing(12),
+    )
+    .width(Length::Fixed(920.0))
+    .padding(18)
+    .style(|_| glass_style(Color::from_rgba(0.105, 0.12, 0.15, 0.98), EDGE_BRIGHT));
+
+    let dim = container(Space::new().width(Length::Fill).height(Length::Fill))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_| container::Style {
+            background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.72).into()),
+            ..Default::default()
+        });
+
+    let centered = container(panel)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center);
+
+    stack![dim, centered]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
 fn downloads_page(app: &App) -> Element<'_, Message> {
     let active_operation = if let Some(id) = app.launch_busy.as_deref() {
         app.data.instances.iter()
