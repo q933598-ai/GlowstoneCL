@@ -3917,7 +3917,7 @@ fn background_preferences(app: &App) -> Element<'_, Message> {
                 .color(SUBTLE),
         );
     } else {
-        let mut choices = row![].spacing(7).wrap();
+        let mut choices = column![].spacing(7);
         for path in &app.background_presets {
             let label = path.file_stem()
                 .and_then(|name| name.to_str())
