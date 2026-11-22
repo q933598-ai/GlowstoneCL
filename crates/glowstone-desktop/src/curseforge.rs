@@ -116,7 +116,7 @@ pub async fn search(
         .append_pair("gameVersion", &version)
         .append_pair("modLoaderType", &loader.to_string())
         .append_pair("searchFilter", query.trim())
-        .append_pair("pageSize", "30")
+        .append_pair("pageSize", "18")
         .append_pair("index", "0")
         .append_pair("sortField", "6")
         .append_pair("sortOrder", "desc");
