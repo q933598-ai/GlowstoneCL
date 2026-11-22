@@ -313,7 +313,7 @@ async fn install_index_files(
     let mut archive = zip::ZipArchive::new(Cursor::new(archive_bytes.to_vec()))
         .map_err(|error| format!("Архив .mrpack не является корректным ZIP: {error}"))?;
     let index_value: Value = {
-        let mut index_file = archive.by_name("modrinth.index.json")
+        let index_file = archive.by_name("modrinth.index.json")
             .map_err(|_| "В .mrpack отсутствует modrinth.index.json.".to_owned())?;
         let mut bytes = Vec::new();
         index_file.take(8 * 1024 * 1024 + 1).read_to_end(&mut bytes)
