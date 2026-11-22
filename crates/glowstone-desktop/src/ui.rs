@@ -170,6 +170,7 @@ pub enum Message {
     CheckUpdates,
     UpdatesLoaded(Result<Vec<UpdateEntry>, String>),
     OpenGithubReleases,
+    OpenUpdate(String),
     WardrobeAnimationTick,
     OpenRepository,
     Info(&'static str),
@@ -437,6 +438,10 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             }
             if page == Page::News {
                 app.selected_news = None;
+                if app.data.settings.show_update_notes && app.updates.is_empty() && !app.updates_busy {
+                    app.updates_busy = true;
+                    return iced::Task::perform(updates::fetch_recent_changes(), Message::UpdatesLoaded);
+                }
             }
             app.notice = None;
             if page == Page::Wardrobe {
@@ -1703,6 +1708,12 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             app.notice = Some(match webbrowser::open("https://github.com/q933598-ai/GlowstoneCL/releases") {
                 Ok(()) => "Открываю страницу релизов GlowstoneCL.".to_owned(),
                 Err(error) => format!("Не удалось открыть страницу релизов: {error}"),
+            });
+        }
+        Message::OpenUpdate(url) => {
+            app.notice = Some(match webbrowser::open(&url) {
+                Ok(()) => "Открываю изменение на GitHub.".to_owned(),
+                Err(error) => format!("Не удалось открыть GitHub: {error}"),
             });
         }
         Message::WardrobeAnimationTick => {
