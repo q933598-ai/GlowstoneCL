@@ -2432,6 +2432,7 @@ fn main_content(app: &App) -> Element<'_, Message> {
         Page::Accounts => accounts_page(app),
         Page::Wardrobe => wardrobe_page(app),
         Page::Settings => settings_page(app),
+        Page::InstanceSettings => instance_settings_page(app),
         Page::Catalog => catalog_page(app),
         Page::Modpacks => modpacks_page(app),
         Page::Downloads => downloads_page(app),
@@ -3458,6 +3459,7 @@ fn instance_card(instance: &GameInstance, selected: bool) -> Element<'static, Me
                 quiet_button("Выбрать", Message::SelectInstance(account_id.clone()))
             },
             mods_action,
+            quiet_button("Настройки", Message::OpenInstanceSettings(account_id.clone())),
             button(icon("play", CYAN, 15.0))
                 .on_press(Message::LaunchInstance(account_id.clone()))
                 .width(36)
@@ -3482,6 +3484,264 @@ fn instance_card(instance: &GameInstance, selected: bool) -> Element<'static, Me
     .width(Length::Fill)
     .style(|_| glass_style(PANEL, EDGE))
     .into()
+}
+
+fn instance_settings_page(app: &App) -> Element<'_, Message> {
+    let Some(instance_id) = app.instance_settings_id.as_deref() else {
+        return column![
+            section_header("НАСТРОЙКИ СБОРКИ", "Сначала выбери сборку в библиотеке."),
+            primary_button("К сборкам", Message::Navigate(Page::Instances)),
+        ].spacing(12).into();
+    };
+    let Some(instance) = app.data.instances.iter().find(|item| item.id.0 == instance_id) else {
+        return column![
+            section_header("СБОРКА НЕ НАЙДЕНА", "Выбранный профиль больше не существует."),
+            primary_button("К сборкам", Message::Navigate(Page::Instances)),
+        ].spacing(12).into();
+    };
+
+    let id = instance.id.0.clone();
+    let is_java = instance.platform == GamePlatform::Java;
+    let loader_choices: &[LoaderKind] = if is_java {
+        &[LoaderKind::Vanilla, LoaderKind::Fabric, LoaderKind::Forge, LoaderKind::NeoForge, LoaderKind::Quilt]
+    } else {
+        &[LoaderKind::HorizonContent, LoaderKind::HorizonNative]
+    };
+
+    let mut loader_row = row![].spacing(7).wrap();
+    for loader in loader_choices {
+        loader_row = loader_row.push(loader_button(*loader, app.instance_settings_loader));
+    }
+
+    let mut launch_controls = column![
+        text("ПАМЯТЬ JVM").size(9).color(CYAN),
+        row![
+            column![
+                text("Минимум").size(8).color(MUTED),
+                text_input("1G", &app.instance_settings.memory_min)
+                    .on_input(Message::InstanceMemoryMinChanged).padding(9).size(10),
+            ].spacing(5).width(Length::Fill),
+            column![
+                text("Максимум").size(8).color(MUTED),
+                text_input("4G", &app.instance_settings.memory_max)
+                    .on_input(Message::InstanceMemoryMaxChanged).padding(9).size(10),
+            ].spacing(5).width(Length::Fill),
+        ].spacing(10),
+        text("JAVA EXECUTABLE").size(9).color(CYAN),
+        text_input("Пусто = Java runtime, выбранный автоматически", &app.instance_settings.java_path)
+            .on_input(Message::InstanceJavaPathChanged).padding(9).size(10),
+        text("ПУТЬ К ФАЙЛУ JAVA. Например: /usr/lib/jvm/java-25-openjdk/bin/java")
+            .size(8).color(SUBTLE),
+        text("JVM ARGUMENTS").size(9).color(CYAN),
+        text_input("-XX:+UseZGC; -XX:+AlwaysPreTouch", &app.instance_settings.jvm_args.replace('\n', "; "))
+            .on_input(Message::InstanceJvmArgsChanged).padding(9).size(9),
+        text("GAME ARGUMENTS").size(9).color(CYAN),
+        text_input("--demo; --fullscreen", &app.instance_settings.game_args.replace('\n', "; "))
+            .on_input(Message::InstanceGameArgsChanged).padding(9).size(9),
+        text("РАЗРЕШЕНИЕ").size(9).color(CYAN),
+        row![
+            column![
+                text("Ширина").size(8).color(MUTED),
+                text_input("1280", &app.instance_settings.resolution_width)
+                    .on_input(Message::InstanceResolutionWidthChanged).padding(9).size(10),
+            ].spacing(5).width(Length::Fill),
+            column![
+                text("Высота").size(8).color(MUTED),
+                text_input("720", &app.instance_settings.resolution_height)
+                    .on_input(Message::InstanceResolutionHeightChanged).padding(9).size(10),
+            ].spacing(5).width(Length::Fill),
+        ].spacing(10),
+        text("Переменные окружения · KEY=VALUE, разделяй записи точкой с запятой. Не сохраняй здесь пароли и токены.")
+            .size(8).color(MUTED),
+        text_input("MANGOHUD=1; __GL_THREADED_OPTIMIZATIONS=0", &app.instance_settings.environment_variables.replace('\n', "; "))
+            .on_input(Message::InstanceEnvironmentChanged).padding(9).size(9),
+    ].spacing(8);
+
+    let mut content = column![
+        row![
+            column![
+                section_header("НАСТРОЙКИ СБОРКИ", &format!("{} · Minecraft {}", instance.name, instance.game_version)),
+                text(format!("{} · {}", instance.platform.label(), loader_label(instance.loader)))
+                    .size(9).color(MUTED),
+            ].spacing(4).width(Length::Fill),
+            quiet_button("← Сборки", Message::Navigate(Page::Instances)),
+            primary_button("Сохранить", Message::SaveInstanceSettings),
+        ].align_y(Alignment::Center).spacing(8),
+        preference_panel(
+            "ЗАГРУЗЧИК",
+            "Смена загрузчика сохранится в профиле. При следующем запуске GlowstoneCL подготовит выбранный loader; существующие моды могут быть несовместимы с новым загрузчиком.",
+            loader_row.into(),
+        ),
+    ].spacing(12).width(Length::Fill);
+
+    if is_java {
+        content = content.push(preference_panel(
+            "ПАРАМЕТРЫ ЗАПУСКА",
+            "Память указывается в M или G. Дополнительные аргументы вводи через точку с запятой: каждый станет отдельным аргументом процесса.",
+            launch_controls.into(),
+        ));
+    } else {
+        content = content.push(preference_panel(
+            "ПАРАМЕТРЫ HORIZON",
+            "Эти настройки Java не применяются к Horizon runtime. Доступны загрузчик и управление локальными данными сборки.",
+            text("Java runtime, JVM arguments и память управляются самим Horizon.").size(9).color(MUTED).into(),
+        ));
+    }
+
+    let mut worlds = column![].spacing(7);
+    if app.instance_worlds.is_empty() {
+        worlds = worlds.push(text("Сохранённых миров не найдено.").size(9).color(MUTED));
+    } else {
+        for world in &app.instance_worlds {
+            worlds = worlds.push(
+                row![
+                    icon("globe", GREEN, 15.0),
+                    column![
+                        text(world.name.clone()).size(10).color(TEXT),
+                        text(format!("Изменён: {} · {}", world.modified_unix, format_file_size(world.size))).size(8).color(MUTED),
+                    ].spacing(3).width(Length::Fill),
+                    quiet_button("Удалить", Message::DeleteInstanceWorld(id.clone(), world.name.clone())),
+                ].align_y(Alignment::Center).spacing(8)
+            );
+        }
+    }
+    content = content.push(preference_panel(
+        "МИРЫ",
+        "Миры находятся в отдельной папке saves этой сборки. Создание нового мира происходит в меню Minecraft, а не в файловом менеджере.",
+        column![
+            row![
+                primary_button("Создать мир", Message::CreateWorld(id.clone())),
+                quiet_button("Открыть папку worlds", Message::OpenInstanceFolder(id.clone(), "saves".to_owned())),
+                quiet_button("Обновить", Message::RefreshInstanceContent),
+            ].spacing(8),
+            worlds,
+        ].spacing(8).into(),
+    ));
+
+    if is_java {
+        let mut servers = column![].spacing(7);
+        if app.instance_servers.is_empty() {
+            servers = servers.push(text("Список серверов пуст.").size(9).color(MUTED));
+        } else {
+            for (index, server) in app.instance_servers.iter().enumerate() {
+                servers = servers.push(
+                    row![
+                        icon("server", CYAN, 15.0),
+                        column![
+                            text(server.name.clone()).size(10).color(TEXT),
+                            text(server.ip.clone()).size(8).color(MUTED),
+                        ].spacing(3).width(Length::Fill),
+                        quiet_button("Удалить", Message::RemoveServer(id.clone(), index)),
+                    ].align_y(Alignment::Center).spacing(8)
+                );
+            }
+        }
+        content = content.push(preference_panel(
+            "СПИСОК СЕРВЕРОВ",
+            "Изменения сохраняются в стандартный servers.dat и будут видны в меню «Сетевая игра» Minecraft.",
+            column![
+                text_input("Название сервера", &app.server_name_input)
+                    .on_input(Message::ServerNameChanged).padding(9).size(9),
+                row![
+                    text_input("play.example.net:25565", &app.server_address_input)
+                        .on_input(Message::ServerAddressChanged).padding(9).size(9).width(Length::Fill),
+                    primary_button("Добавить", Message::AddServer),
+                ].spacing(7),
+                servers,
+            ].spacing(8).into(),
+        ));
+    }
+
+    if is_java {
+        let mut mods_list = column![].spacing(7);
+        if app.local_mod_files.is_empty() {
+            mods_list = mods_list.push(text("JAR-файлы в папке mods не найдены.").size(9).color(MUTED));
+        } else {
+            for item in &app.local_mod_files {
+                mods_list = mods_list.push(
+                    row![
+                        icon("puzzle", PURPLE, 15.0),
+                        column![
+                            text(item.title.clone()).size(10).color(TEXT),
+                            text(format!("{} · {} · {}", item.version, item.file_name, format_file_size(item.size)))
+                                .size(8).color(MUTED),
+                            text(if item.managed { "УПРАВЛЯЕТСЯ GLOWSTONECL" } else { "ДОБАВЛЕН ВРУЧНУЮ / МОДПАКОМ" })
+                                .size(7).color(if item.managed { GREEN } else { SUBTLE }),
+                        ].spacing(3).width(Length::Fill),
+                        quiet_button("Удалить", Message::RemoveInstalledModFile(id.clone(), item.file_name.clone())),
+                    ].align_y(Alignment::Center).spacing(8)
+                );
+            }
+        }
+        content = content.push(preference_panel(
+            "УСТАНОВЛЕННЫЕ МОДЫ",
+            "Показываются все JAR-файлы из папки этой сборки, а не только установленные через каталог GlowstoneCL. Удаление необратимо.",
+            column![
+                row![
+                    text(format!("{} файлов", app.local_mod_files.len())).size(9).color(MUTED),
+                    Space::new().width(Length::Fill),
+                    quiet_button("Открыть папку mods", Message::OpenInstanceFolder(id.clone(), "mods".to_owned())),
+                    quiet_button("Обновить", Message::RefreshInstanceContent),
+                ].align_y(Alignment::Center).spacing(7),
+                mods_list,
+            ].spacing(8).into(),
+        ));
+    } else {
+        content = content.push(preference_panel(
+            "HORIZON MODS",
+            "Horizon content-моды управляются через вкладку Horizon в каталоге модов.",
+            quiet_button("Открыть каталог модов", Message::OpenInstanceMods(id.clone())).into(),
+        ));
+    }
+
+    let mut screenshots = column![].spacing(8);
+    if app.instance_screenshots.is_empty() {
+        screenshots = screenshots.push(text("Скриншоты пока не найдены.").size(9).color(MUTED));
+    } else {
+        for item in &app.instance_screenshots {
+            screenshots = screenshots.push(
+                row![
+                    column![
+                        text(item.name.clone()).size(9).color(TEXT),
+                        text(format_file_size(item.size)).size(8).color(MUTED),
+                    ].spacing(3).width(Length::Fill),
+                    quiet_button("Удалить", Message::DeleteInstanceScreenshot(id.clone(), item.name.clone())),
+                ].spacing(8).align_y(Alignment::Center)
+            );
+        }
+    }
+    content = content.push(preference_panel(
+        "СКРИНШОТЫ",
+        "Изображения хранятся в screenshots внутри этой сборки. Их можно открыть в файловом менеджере.",
+        column![
+            row![
+                quiet_button("Открыть папку screenshots", Message::OpenInstanceFolder(id.clone(), "screenshots".to_owned())),
+                quiet_button("Обновить", Message::RefreshInstanceContent),
+            ].spacing(8),
+            screenshots,
+        ].spacing(8).into(),
+    ));
+
+    if let Some(notice) = &app.notice {
+        content = content.push(
+            container(text(notice.clone()).size(9).color(TEXT))
+                .padding(10).width(Length::Fill)
+                .style(|_| glass_style(CYAN_DARK, EDGE_BRIGHT))
+        );
+    }
+    content.into()
+}
+
+fn format_file_size(size: u64) -> String {
+    if size >= 1_073_741_824 {
+        format!("{:.1} GiB", size as f64 / 1_073_741_824.0)
+    } else if size >= 1_048_576 {
+        format!("{:.1} MiB", size as f64 / 1_048_576.0)
+    } else if size >= 1024 {
+        format!("{:.1} KiB", size as f64 / 1024.0)
+    } else {
+        format!("{size} B")
+    }
 }
 
 fn wardrobe_account(app: &App) -> Option<&AccountProfile> {
