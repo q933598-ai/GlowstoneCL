@@ -90,6 +90,153 @@ pub struct PersistedState {
     pub favorite_instance_ids: Vec<String>,
 }
 
+/// Per-build Java/runtime settings. Missing fields in older instance-settings.json
+/// files are filled from these defaults.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct InstanceSettings {
+    pub memory_min: String,
+    pub memory_max: String,
+    /// Empty means use the runtime selected by Mojang/CrustCore.
+    pub java_path: String,
+    /// One JVM argument per line; shell parsing is deliberately not used.
+    pub jvm_args: String,
+    /// One game argument per line.
+    pub game_args: String,
+    pub resolution_width: String,
+    pub resolution_height: String,
+    /// KEY=VALUE per line. Do not store passwords or access tokens here.
+    pub environment_variables: String,
+}
+
+impl Default for InstanceSettings {
+    fn default() -> Self {
+        Self {
+            memory_min: "1G".to_owned(),
+            memory_max: "4G".to_owned(),
+            java_path: String::new(),
+            jvm_args: String::new(),
+            game_args: String::new(),
+            resolution_width: "1280".to_owned(),
+            resolution_height: "720".to_owned(),
+            environment_variables: String::new(),
+        }
+    }
+}
+
+impl InstanceSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        let min = parse_memory_size(&self.memory_min)
+            .ok_or_else(|| "Минимальная память должна иметь формат вроде 512M или 1G.".to_owned())?;
+        let max = parse_memory_size(&self.memory_max)
+            .ok_or_else(|| "Максимальная память должна иметь формат вроде 4G или 6144M.".to_owned())?;
+        if min > max {
+            return Err("Минимальная память не может быть больше максимальной.".to_owned());
+        }
+
+        let width = parse_resolution(&self.resolution_width)?;
+        let height = parse_resolution(&self.resolution_height)?;
+        if width.is_some() != height.is_some() {
+            return Err("Укажи одновременно ширину и высоту разрешения или оставь оба поля пустыми.".to_owned());
+        }
+
+        if !self.java_path.trim().is_empty() && !std::path::Path::new(self.java_path.trim()).is_file() {
+            return Err("Указанный Java executable не найден. Проверь путь к java.".to_owned());
+        }
+
+        self.environment_entries()?;
+        validate_argument_lines(&self.jvm_args, "JVM")?;
+        validate_argument_lines(&self.game_args, "игровые")?;
+        Ok(())
+    }
+
+    pub fn environment_entries(&self) -> Result<Vec<(String, String)>, String> {
+        let mut entries = Vec::new();
+        for (index, line) in self.environment_variables.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let (key, value) = line.split_once('=').ok_or_else(|| {
+                format!("Переменная окружения в строке {} должна иметь формат KEY=VALUE.", index + 1)
+            })?;
+            let valid_key = !key.is_empty()
+                && key.bytes().enumerate().all(|(i, byte)| {
+                    byte == b'_'
+                        || byte.is_ascii_alphabetic()
+                        || (i > 0 && byte.is_ascii_digit())
+                });
+            if !valid_key || value.contains('\0') {
+                return Err(format!("Некорректная переменная окружения в строке {}.", index + 1));
+            }
+            entries.push((key.to_owned(), value.to_owned()));
+        }
+        Ok(entries)
+    }
+
+    pub fn jvm_argument_list(&self) -> Result<Vec<String>, String> {
+        validate_argument_lines(&self.jvm_args, "JVM")?;
+        Ok(self.jvm_args.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned).collect())
+    }
+
+    pub fn game_argument_list(&self) -> Result<Vec<String>, String> {
+        validate_argument_lines(&self.game_args, "игровые")?;
+        Ok(self.game_args.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned).collect())
+    }
+
+    pub fn resolution(&self) -> Result<Option<(u32, u32)>, String> {
+        let width = parse_resolution(&self.resolution_width)?;
+        let height = parse_resolution(&self.resolution_height)?;
+        match (width, height) {
+            (Some(width), Some(height)) => Ok(Some((width, height))),
+            (None, None) => Ok(None),
+            _ => Err("Укажи одновременно ширину и высоту разрешения.".to_owned()),
+        }
+    }
+}
+
+fn parse_memory_size(value: &str) -> Option<u64> {
+    let value = value.trim().to_ascii_uppercase();
+    let (number, unit) = value.split_at(value.find(|ch: char| !ch.is_ascii_digit())?);
+    let amount: u64 = number.parse().ok()?;
+    match unit {
+        "M" | "MB" => amount.checked_mul(1024),
+        "G" | "GB" => amount.checked_mul(1024 * 1024),
+        _ => None,
+    }
+}
+
+fn parse_resolution(value: &str) -> Result<Option<u32>, String> {
+    let value = value.trim();
+    if value.is_empty() || value == "0" {
+        return Ok(None);
+    }
+    let parsed: u32 = value.parse()
+        .map_err(|_| "Разрешение должно состоять из целых чисел.".to_owned())?;
+    if !(320..=16_384).contains(&parsed) {
+        return Err("Ширина и высота должны быть от 320 до 16384 пикселей.".to_owned());
+    }
+    Ok(Some(parsed))
+}
+
+fn validate_argument_lines(value: &str, label: &str) -> Result<(), String> {
+    for (index, line) in value.lines().enumerate() {
+        let line = line.trim();
+        if line.contains('\0') || line.len() > 4096 {
+            return Err(format!("Некорректный {label}-аргумент в строке {}.", index + 1));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalFileEntry {
+    pub name: String,
+    pub size: u64,
+    pub modified_unix: u64,
+}
+
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecentPlay {
     pub instance_id: String,
@@ -338,6 +485,140 @@ pub fn remove_instance(instance_id: &str) -> Result<(), String> {
     fs::rename(&directory, &destination)
         .map_err(|error| format!("Не удалось переместить сборку в корзину: {error}"))?;
 
+    Ok(())
+}
+
+
+/// Loads settings stored beside this instance's isolated game directory.
+pub fn load_instance_settings(instance_id: &str) -> Result<InstanceSettings, String> {
+    let path = instance_directory(instance_id)?.join("instance-settings.json");
+    match fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .map_err(|error| format!("Не удалось прочитать настройки сборки: {error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(InstanceSettings::default()),
+        Err(error) => Err(format!("Не удалось открыть настройки сборки: {error}")),
+    }
+}
+
+pub fn save_instance_settings(instance_id: &str, settings: &InstanceSettings) -> Result<(), String> {
+    settings.validate()?;
+    let directory = instance_directory(instance_id)?;
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("Не удалось создать папку сборки: {error}"))?;
+    let path = directory.join("instance-settings.json");
+    let temporary = directory.join("instance-settings.json.tmp");
+    let bytes = serde_json::to_vec_pretty(settings)
+        .map_err(|error| format!("Не удалось сериализовать настройки сборки: {error}"))?;
+    fs::write(&temporary, bytes)
+        .map_err(|error| format!("Не удалось записать настройки сборки: {error}"))?;
+    fs::rename(&temporary, &path)
+        .map_err(|error| format!("Не удалось сохранить настройки сборки: {error}"))
+}
+
+pub fn list_instance_folder(instance_id: &str, folder: &str) -> Result<Vec<LocalFileEntry>, String> {
+    if !matches!(folder, "saves" | "screenshots") {
+        return Err("Недопустимый каталог содержимого сборки.".to_owned());
+    }
+    let directory = instance_directory(instance_id)?.join(folder);
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("Не удалось открыть каталог {folder}: {error}"))?;
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(&directory)
+        .map_err(|error| format!("Не удалось прочитать каталог {folder}: {error}"))?
+    {
+        let entry = entry.map_err(|error| format!("Не удалось прочитать запись каталога: {error}"))?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| format!("Не удалось прочитать свойства файла: {error}"))?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        let is_valid = if folder == "saves" {
+            metadata.is_dir()
+        } else {
+            metadata.is_file() && path.extension().and_then(|value| value.to_str())
+                .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg"))
+        };
+        if !is_valid {
+            continue;
+        }
+        let modified_unix = metadata.modified().ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs())
+            .unwrap_or_default();
+        entries.push(LocalFileEntry {
+            name: entry.file_name().to_string_lossy().into_owned(),
+            size: metadata.len(),
+            modified_unix,
+        });
+    }
+    entries.sort_by(|a, b| b.modified_unix.cmp(&a.modified_unix).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    Ok(entries)
+}
+
+pub fn remove_instance_world(instance_id: &str, world_name: &str) -> Result<(), String> {
+    validate_single_component(world_name)?;
+    let path = instance_directory(instance_id)?.join("saves").join(world_name);
+    let metadata = fs::symlink_metadata(&path)
+        .map_err(|error| format!("Не удалось найти мир: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err("Можно удалять только обычные папки миров внутри saves.".to_owned());
+    }
+    fs::remove_dir_all(&path)
+        .map_err(|error| format!("Не удалось удалить мир {world_name}: {error}"))
+}
+
+pub fn remove_instance_screenshot(instance_id: &str, file_name: &str) -> Result<(), String> {
+    validate_single_component(file_name)?;
+    let path = instance_directory(instance_id)?.join("screenshots").join(file_name);
+    let metadata = fs::symlink_metadata(&path)
+        .map_err(|error| format!("Не удалось найти скриншот: {error}"))?;
+    let valid_extension = path.extension().and_then(|value| value.to_str())
+        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg"));
+    if metadata.file_type().is_symlink() || !metadata.is_file() || !valid_extension {
+        return Err("Можно удалять только изображения из каталога screenshots.".to_owned());
+    }
+    fs::remove_file(&path)
+        .map_err(|error| format!("Не удалось удалить скриншот: {error}"))
+}
+
+fn validate_single_component(value: &str) -> Result<(), String> {
+    let path = std::path::Path::new(value);
+    if value.is_empty()
+        || value == "." || value == ".."
+        || path.components().count() != 1
+        || !matches!(path.components().next(), Some(std::path::Component::Normal(_)))
+        || value.contains('/') || value.contains('\\') || value.contains('\0')
+    {
+        return Err("Недопустимое имя файла или папки.".to_owned());
+    }
+    Ok(())
+}
+
+/// Opens only a folder inside the selected instance with the platform file manager.
+pub fn open_instance_folder(instance_id: &str, folder: &str) -> Result<(), String> {
+    if !matches!(folder, "saves" | "screenshots" | "mods" | "logs") {
+        return Err("Недопустимый каталог сборки.".to_owned());
+    }
+    let path = instance_directory(instance_id)?.join(folder);
+    fs::create_dir_all(&path)
+        .map_err(|error| format!("Не удалось создать каталог: {error}"))?;
+
+    #[cfg(target_os = "linux")]
+    let mut command = std::process::Command::new("xdg-open");
+    #[cfg(target_os = "macos")]
+    let mut command = std::process::Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("explorer");
+        command.arg(&path);
+        command
+    };
+    #[cfg(not(target_os = "windows"))]
+    command.arg(&path);
+
+    command.spawn()
+        .map_err(|error| format!("Не удалось открыть папку {}: {error}", path.display()))?;
     Ok(())
 }
 
