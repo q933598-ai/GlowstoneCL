@@ -10,14 +10,9 @@ struct RpcState {
 
 static CLIENT: OnceLock<Mutex<RpcState>> = OnceLock::new();
 
-/// Reads the maintainer-configured Discord Application ID at runtime.
-/// It deliberately stays outside the public source tree and compiled artifacts.
-pub fn application_id() -> String {
-    std::env::var("GLOWSTONE_DISCORD_APPLICATION_ID")
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
-        .unwrap_or_default()
+/// Shared Discord Application ID used by GlowstoneCL Rich Presence.
+pub fn application_id() -> &'static str {
+    "1574029556392923247"
 }
 
 /// Updates Discord Rich Presence, reconnecting automatically if the Application ID changes.
