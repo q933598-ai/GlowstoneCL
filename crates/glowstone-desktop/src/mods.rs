@@ -453,7 +453,7 @@ fn toml_string_value(section: &str, key: &str) -> Option<String> {
 
 fn read_embedded_icon(archive: &mut zip::ZipArchive<std::fs::File>, path: &str) -> Option<Vec<u8>> {
     use std::io::Read as _;
-    let mut file = archive.by_name(path).ok()?;
+    let file = archive.by_name(path).ok()?;
     let mut bytes = Vec::new();
     file.take((MAX_ICON_BYTES + 1) as u64).read_to_end(&mut bytes).ok()?;
     if bytes.len() <= MAX_ICON_BYTES && looks_like_image(&bytes) {
