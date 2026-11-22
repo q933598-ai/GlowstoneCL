@@ -76,9 +76,11 @@ Force X11 for the GlowstoneCL window:
 
     cargo run -p glowstonecl -- --backend x11
 
-Run with automatic backend selection:
+Run with automatic backend selection (Wayland is preferred when its compositor socket is reachable; otherwise X11 is used when `DISPLAY` is available):
 
     cargo run -p glowstonecl
+
+You can also explicitly request automatic selection with `--backend auto`.
 
 The backend switch applies to GlowstoneCL only. The original `DISPLAY` / `WAYLAND_DISPLAY` value is restored on Java and Horizon game processes, so the game receives the desktop session environment and can select its own supported backend.
 
