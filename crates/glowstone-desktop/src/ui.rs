@@ -1006,9 +1006,6 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         Message::InstanceResolutionHeightChanged(value) => app.instance_settings.resolution_height = value,
         Message::InstanceEnvironmentChanged(value) => app.instance_settings.environment_variables = value,
         Message::InstanceLoaderChanged(loader) => app.instance_settings_loader = loader,
-        Message::ToggleInstanceMinimizeToTray(enabled) => {
-            app.instance_settings.minimize_to_tray_on_launch = enabled;
-        }
         Message::RefreshInstanceContent => {
             if let Some(instance_id) = app.instance_settings_id.clone() {
                 app.instance_worlds = store::list_instance_folder(&instance_id, "saves").unwrap_or_default();
@@ -2152,6 +2149,13 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             app.discord_diagnostics = crate::discord::diagnostics();
             app.notice = Some(app.discord_diagnostics.clone());
         }
+        Message::DiscordDiagnosticsLoaded(details) => {
+            app.discord_diagnostics = details;
+        }
+        Message::CheckDiscordDiagnostics => {
+            app.discord_diagnostics = crate::discord::diagnostics();
+            app.notice = Some(app.discord_diagnostics.clone());
+        }
         Message::DiscordDiagnosticsLoaded(details) => app.discord_diagnostics = details,
         Message::SaveDiscordClientId => {
             app.notice = store::save(&app.data).err()
@@ -2651,6 +2655,42 @@ fn sidebar(app: &App) -> Element<'_, Message> {
             Space::new().height(8),
             platforms,
             Space::new().height(Length::Fill),
+            button(
+                row![
+                    icon(
+                        if app.update_available { "download" } else { "refresh-cw" },
+                        if app.update_available { GREEN } else { CYAN },
+                        15.0,
+                    ),
+                    text(
+                        if app.updates_busy {
+                            "Проверка…"
+                        } else if app.update_available {
+                            "Обновить"
+                        } else {
+                            "Проверить обновления"
+                        }
+                    )
+                    .size(8)
+                    .color(TEXT),
+                ].spacing(8).align_y(Alignment::Center),
+            )
+            .on_press(if app.update_available {
+                Message::OpenGithubReleases
+            } else {
+                Message::CheckUpdates
+            })
+            .padding([10, 9])
+            .width(Length::Fill)
+            .style(|theme, status| {
+                let mut style = button::secondary(theme, status);
+                style.background = Some(if app.update_available { CYAN_DARK } else { PANEL_LIGHT }.into());
+                style.text_color = TEXT;
+                style.border = Border::default().rounded(12).width(1)
+                    .color(if app.update_available { EDGE_BRIGHT } else { EDGE });
+                style
+            }),
+            Space::new().height(7),
             profile,
         ]
         .spacing(0)
@@ -4007,6 +4047,11 @@ fn instance_settings_page(app: &App) -> Element<'_, Message> {
             app.instance_settings.minimize_to_tray_on_launch,
             Message::ToggleInstanceMinimizeToTray(!app.instance_settings.minimize_to_tray_on_launch),
         ),
+        choice_button(
+            "Сворачивать лаунчер в трей при запуске этой сборки",
+            app.instance_settings.minimize_to_tray_on_launch,
+            Message::ToggleInstanceMinimizeToTray(!app.instance_settings.minimize_to_tray_on_launch),
+        ),
         text("JVM ARGUMENTS").size(9).color(CYAN),
         text_input("-XX:+UseZGC; -XX:+AlwaysPreTouch", &app.instance_settings.jvm_args)
             .on_input(Message::InstanceJvmArgsChanged).padding(9).size(9),
@@ -4935,6 +4980,24 @@ fn settings_page(app: &App) -> Element<'_, Message> {
         settings_card("БЕЗОПАСНОСТЬ", "Microsoft refresh token", "Токены сохраняются через системное хранилище паролей. Если Secret Service недоступен, приложение покажет предупреждение."),
         background_preferences(app),
         preference_panel(
+            "ПРОИЗВОДИТЕЛЬНОСТЬ И ИНТЕРФЕЙС",
+            "Анимации включаются только при переходах и в активном 3D-гардеробе. Постоянного 20 FPS таймера перерисовки больше нет.",
+            column![
+                row![
+                    choice_button("Анимации включены", app.data.settings.animations_enabled, Message::ToggleAnimations(true)),
+                    choice_button("Анимации выключены", !app.data.settings.animations_enabled, Message::ToggleAnimations(false)),
+                ].spacing(7),
+                row![
+                    choice_button("Звук наведения включён", app.data.settings.hover_sounds_enabled, Message::ToggleHoverSounds(true)),
+                    choice_button("Звук наведения выключен", !app.data.settings.hover_sounds_enabled, Message::ToggleHoverSounds(false)),
+                ].spacing(7),
+                row![
+                    choice_button("Сворачивать в трей при запуске", app.data.settings.minimize_to_tray_on_launch, Message::ToggleMinimizeToTray(true)),
+                    choice_button("Оставлять окно открытым", !app.data.settings.minimize_to_tray_on_launch, Message::ToggleMinimizeToTray(false)),
+                ].spacing(7),
+            ].spacing(8).into(),
+        ),
+        preference_panel(
             "ЯЗЫК",
             "Выбор сохраняется в профиле приложения. Сейчас доступны русская и английская локали; перевод отдельных экранов ещё расширяется.",
             row![
@@ -4971,6 +5034,10 @@ fn settings_page(app: &App) -> Element<'_, Message> {
                 ]
                 .spacing(7)
                 .align_y(Alignment::Center),
+                row![
+                    quiet_button("Проверить IPC", Message::CheckDiscordDiagnostics),
+                    text(app.discord_diagnostics.clone()).size(8).color(SUBTLE),
+                ].spacing(8).align_y(Alignment::Center),
             ]
             .spacing(8)
             .into(),
@@ -5986,7 +6053,7 @@ fn status_chip(
 }
 
 fn primary_button(label: &'static str, message: Message) -> Element<'static, Message> {
-    button(text(label).size(10).color(TEXT))
+    let control: Element<'static, Message> = button(text(label).size(10).color(TEXT))
         .on_press(message)
         .padding([10, 15])
         .style(|theme, status| {
@@ -6002,17 +6069,18 @@ fn primary_button(label: &'static str, message: Message) -> Element<'static, Mes
             style.text_color = TEXT;
             style.border = Border::default().rounded(13).width(1).color(EDGE_BRIGHT);
             style.shadow = Shadow {
-                color: Color::from_rgba(0.0, 0.0, 0.0, 0.30),
-                offset: Vector::new(0.0, 3.0),
-                blur_radius: 12.0,
+                color: Color::from_rgba(0.88, 0.56, 0.24, if matches!(status, button::Status::Hovered) { 0.28 } else { 0.14 }),
+                offset: Vector::new(0.0, if matches!(status, button::Status::Hovered) { 1.0 } else { 3.0 }),
+                blur_radius: if matches!(status, button::Status::Hovered) { 20.0 } else { 12.0 },
             };
             style
         })
-        .into()
+        .into();
+    mouse_area(control).on_enter(Message::HoverButton).into()
 }
 
 fn tonal_button(label: &'static str, message: Message) -> Element<'static, Message> {
-    button(text(label).size(9).color(TEXT))
+    let control: Element<'static, Message> = button(text(label).size(9).color(TEXT))
         .on_press(message)
         .padding([10, 14])
         .style(|theme, status| {
@@ -6029,21 +6097,80 @@ fn tonal_button(label: &'static str, message: Message) -> Element<'static, Messa
             style.border = Border::default().rounded(16).width(1).color(EDGE);
             style
         })
-        .into()
+        .into();
+    mouse_area(control).on_enter(Message::HoverButton).into()
 }
 
 fn quiet_button(label: &'static str, message: Message) -> Element<'static, Message> {
-    button(text(label).size(9).color(TEXT))
+    let control: Element<'static, Message> = button(text(label).size(9).color(TEXT))
         .on_press(message)
         .padding([10, 14])
         .style(|theme, status| {
             let mut style = button::secondary(theme, status);
-            style.background = Some(Color::from_rgba(0.94, 0.96, 1.0, 0.08).into());
+            style.background = Some(if matches!(status, button::Status::Hovered) {
+                Color::from_rgba(0.95, 0.80, 0.56, 0.17).into()
+            } else {
+                Color::from_rgba(0.94, 0.96, 1.0, 0.08).into()
+            });
             style.text_color = TEXT;
-            style.border = Border::default().rounded(11).width(1).color(EDGE);
+            style.border = Border::default().rounded(11).width(1).color(
+                if matches!(status, button::Status::Hovered) { EDGE_BRIGHT } else { EDGE }
+            );
             style
         })
-        .into()
+        .into();
+    mouse_area(control).on_enter(Message::HoverButton).into()
+}
+
+fn play_hover_sound() {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+    static LAST_PLAYED: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+    let last = LAST_PLAYED.get_or_init(|| Mutex::new(None));
+    if let Ok(mut previous) = last.lock() {
+        let now = Instant::now();
+        if previous.is_some_and(|time| now.duration_since(time) < Duration::from_millis(180)) {
+            return;
+        }
+        *previous = Some(now);
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("canberra-gtk-play")
+            .args(["-i", "button-pressed"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        #[link(name = "user32")]
+        extern "system" { fn MessageBeep(kind: u32) -> i32; }
+        unsafe { let _ = MessageBeep(0x40); }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("afplay")
+            .arg("/System/Library/Sounds/Tink.aiff")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+}
+
+fn loader_icon(loader: LoaderKind) -> &'static str {
+    match loader {
+        LoaderKind::Vanilla => "minecraft",
+        LoaderKind::Fabric => "fabric",
+        LoaderKind::Forge => "forge",
+        LoaderKind::NeoForge => "neoforge",
+        LoaderKind::Quilt => "quilt",
+        LoaderKind::HorizonContent => "horizon",
+        LoaderKind::HorizonNative => "horizon",
+    }
 }
 
 fn loader_label(loader: LoaderKind) -> &'static str {
