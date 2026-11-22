@@ -5084,30 +5084,26 @@ fn java_catalog_page(app: &App) -> Element<'_, Message> {
     )).unwrap_or_else(|| "Сборка не выбрана".to_owned());
 
     let mut installed_list = column![].spacing(7);
-    if app.installed_mods.is_empty() {
+    if app.local_mod_files.is_empty() {
         installed_list = installed_list.push(
-            text("Пока нет модов, установленных через каталог GlowstoneCL.")
-                .size(9).color(SUBTLE)
+            text("В этой сборке пока нет JAR-модов.").size(9).color(SUBTLE)
         );
     } else {
-        for item in &app.installed_mods {
-            let project_id = item.project_id.clone();
+        for item in &app.local_mod_files {
+            let file_name = item.file_name.clone();
             let target_id = app.mod_target_instance.clone().unwrap_or_default();
             installed_list = installed_list.push(
                 container(
                     row![
-                        mod_icon(item.icon_data.clone(), item.title.clone()),
+                        icon("puzzle", PURPLE, 17.0),
                         column![
                             text(item.title.clone()).size(10).color(TEXT),
-                            text(format!("{} · {}", item.version_number, item.file_name)).size(8).color(MUTED),
-                            if item.dependency {
-                                text("ОБЯЗАТЕЛЬНАЯ ЗАВИСИМОСТЬ").size(7).color(PURPLE)
-                            } else {
-                                text("MODRINTH").size(7).color(CYAN)
-                            },
-                        ].spacing(3),
-                        Space::new().width(Length::Fill),
-                        quiet_button("Удалить", Message::RemoveMod(target_id, project_id)),
+                            text(format!("{} · {} · {}", item.version, item.file_name, format_file_size(item.size)))
+                                .size(8).color(MUTED),
+                            text(if item.managed { "УПРАВЛЯЕТСЯ GLOWSTONECL" } else { "РУЧНАЯ УСТАНОВКА / МОДПАК" })
+                                .size(7).color(if item.managed { GREEN } else { SUBTLE }),
+                        ].spacing(3).width(Length::Fill),
+                        quiet_button("Удалить", Message::RemoveInstalledModFile(target_id, file_name)),
                     ].align_y(Alignment::Center).spacing(8)
                 )
                 .padding(10)
@@ -5172,7 +5168,7 @@ fn java_catalog_page(app: &App) -> Element<'_, Message> {
                 ].spacing(8),
                 targets,
                 text(format!("Целевая сборка: {current_profile}")).size(9).color(MUTED),
-                text("Моды будут установлены только в эту сборку. Обязательные зависимости Modrinth скачиваются автоматически.")
+                text(format!("Моды будут установлены только в эту сборку. В каталоге показано {} JAR-файлов из папки mods; обязательные зависимости Modrinth скачиваются автоматически.", app.local_mod_files.len()))
                     .size(8).color(SUBTLE),
             ].spacing(9)
         )
