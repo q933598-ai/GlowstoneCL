@@ -913,20 +913,11 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         Message::InstanceMemoryMinChanged(value) => app.instance_settings.memory_min = value,
         Message::InstanceMemoryMaxChanged(value) => app.instance_settings.memory_max = value,
         Message::InstanceJavaPathChanged(value) => app.instance_settings.java_path = value,
-        Message::InstanceJvmArgsChanged(value) => {
-            app.instance_settings.jvm_args = value.split(';').map(str::trim)
-                .filter(|line| !line.is_empty()).collect::<Vec<_>>().join("\n");
-        }
-        Message::InstanceGameArgsChanged(value) => {
-            app.instance_settings.game_args = value.split(';').map(str::trim)
-                .filter(|line| !line.is_empty()).collect::<Vec<_>>().join("\n");
-        }
+        Message::InstanceJvmArgsChanged(value) => app.instance_settings.jvm_args = value,
+        Message::InstanceGameArgsChanged(value) => app.instance_settings.game_args = value,
         Message::InstanceResolutionWidthChanged(value) => app.instance_settings.resolution_width = value,
         Message::InstanceResolutionHeightChanged(value) => app.instance_settings.resolution_height = value,
-        Message::InstanceEnvironmentChanged(value) => {
-            app.instance_settings.environment_variables = value.split(';').map(str::trim)
-                .filter(|line| !line.is_empty()).collect::<Vec<_>>().join("\n");
-        }
+        Message::InstanceEnvironmentChanged(value) => app.instance_settings.environment_variables = value,
         Message::InstanceLoaderChanged(loader) => app.instance_settings_loader = loader,
         Message::RefreshInstanceContent => {
             if let Some(instance_id) = app.instance_settings_id.clone() {
@@ -3113,6 +3104,17 @@ fn news_page(app: &App) -> Element<'_, Message> {
     .width(Length::Fill);
     if app.data.settings.show_update_notes {
         list = list.push(update_notes_panel(app));
+    } else {
+        list = list.push(
+            row![
+                column![
+                    text("ПРОВЕРКА ОБНОВЛЕНИЙ").size(9).color(CYAN),
+                    text(if app.updates_busy { "Проверяю изменения на GitHub…" } else if let Some(error) = &app.updates_error { error.as_str() } else { "Журнал скрыт в настройках, но проверку можно запустить вручную." })
+                        .size(8).color(MUTED),
+                ].spacing(4).width(Length::Fill),
+                primary_button(if app.updates_busy { "Проверка…" } else { "Проверить обновления" }, Message::CheckUpdates),
+            ].align_y(Alignment::Center).spacing(9)
+        );
     }
     for (index, entry) in entries.iter().enumerate() {
         let entry = *entry;
@@ -3599,10 +3601,10 @@ fn instance_settings_page(app: &App) -> Element<'_, Message> {
         text("ПУТЬ К ФАЙЛУ JAVA. Например: /usr/lib/jvm/java-25-openjdk/bin/java")
             .size(8).color(SUBTLE),
         text("JVM ARGUMENTS").size(9).color(CYAN),
-        text_input("-XX:+UseZGC; -XX:+AlwaysPreTouch", &app.instance_settings.jvm_args.replace('\n', "; "))
+        text_input("-XX:+UseZGC; -XX:+AlwaysPreTouch", &app.instance_settings.jvm_args)
             .on_input(Message::InstanceJvmArgsChanged).padding(9).size(9),
         text("GAME ARGUMENTS").size(9).color(CYAN),
-        text_input("--demo; --fullscreen", &app.instance_settings.game_args.replace('\n', "; "))
+        text_input("--demo; --fullscreen", &app.instance_settings.game_args)
             .on_input(Message::InstanceGameArgsChanged).padding(9).size(9),
         text("РАЗРЕШЕНИЕ").size(9).color(CYAN),
         row![
@@ -3619,7 +3621,7 @@ fn instance_settings_page(app: &App) -> Element<'_, Message> {
         ].spacing(10),
         text("Переменные окружения · KEY=VALUE, разделяй записи точкой с запятой. Не сохраняй здесь пароли и токены.")
             .size(8).color(MUTED),
-        text_input("MANGOHUD=1; __GL_THREADED_OPTIMIZATIONS=0", &app.instance_settings.environment_variables.replace('\n', "; "))
+        text_input("MANGOHUD=1; __GL_THREADED_OPTIMIZATIONS=0", &app.instance_settings.environment_variables)
             .on_input(Message::InstanceEnvironmentChanged).padding(9).size(9),
     ].spacing(8);
 
