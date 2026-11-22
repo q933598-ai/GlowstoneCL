@@ -85,3 +85,53 @@ pub fn set_enabled(enabled: bool, application_id: &str) -> Result<String, String
 fn truncate(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
+
+
+/// Explains why local Discord IPC may not be reachable. Uses only the common
+/// runtime directories and the same Flatpak/Snap paths searched by the RPC client.
+pub fn diagnostics() -> String {
+    #[cfg(unix)]
+    {
+        const ENV_KEYS: [&str; 4] = ["XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"];
+        const APP_SUBPATHS: [&str; 7] = [
+            "",
+            "app/com.discordapp.Discord/",
+            "app/dev.vencord.Vesktop/",
+            ".flatpak/com.discordapp.Discord/xdg-run/",
+            ".flatpak/dev.vencord.Vesktop/xdg-run/",
+            "snap.discord-canary/",
+            "snap.discord/",
+        ];
+        let mut checked = Vec::new();
+        for key in ENV_KEYS {
+            let Some(value) = std::env::var_os(key) else { continue };
+            let base = std::path::PathBuf::from(value);
+            if !base.is_dir() { continue; }
+            for subpath in APP_SUBPATHS {
+                for index in 0..10 {
+                    let path = base.join(subpath).join(format!("discord-ipc-{index}"));
+                    if path.exists() {
+                        return format!("IPC найден: {}. Проверь, что Discord и GlowstoneCL запущены от одного пользователя.", path.display());
+                    }
+                }
+            }
+            checked.push(format!("{key}={}", base.display()));
+        }
+        if checked.is_empty() {
+            "Discord IPC не найден: XDG_RUNTIME_DIR/TMPDIR не заданы. Убедись, что Discord запущен в той же пользовательской сессии.".to_owned()
+        } else {
+            format!(
+                "Discord IPC не найден. Проверены: {}. Запусти Discord перед GlowstoneCL; Flatpak/Snap могут изолировать сокет.",
+                checked.join(" · ")
+            )
+        }
+    }
+    #[cfg(windows)]
+    {
+        "Windows: Discord RPC использует локальный discord-ipc named pipe. Убедись, что Discord открыт и Application ID указан без пробелов.".to_owned()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "macOS: Discord RPC использует локальный Unix socket. Убедись, что Discord открыт в том же пользовательском сеансе.".to_owned()
+    }
+}
