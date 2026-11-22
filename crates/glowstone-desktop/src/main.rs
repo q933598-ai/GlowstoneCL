@@ -11,6 +11,7 @@ mod store;
 mod skin_preview;
 mod discord;
 mod updates;
+mod tray;
 mod ui;
 
 fn main() -> iced::Result {
