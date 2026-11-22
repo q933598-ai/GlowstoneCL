@@ -30,16 +30,16 @@ The `test/glowstonecl` branch includes:
 - Microsoft refresh-token storage in the operating system credential store, with session refresh before launching a game;
 - offline profiles for Java offline-mode play and the separate Horizon Offline fork;
 - a skin wardrobe for offline and Microsoft profiles, with per-profile PNG collections, current-skin sync for Microsoft accounts, official Minecraft Services upload, a mouse-rotatable 3D player, compact 3D previews for the other saved skins, and decoded-pixel deduplication so PNG re-encoding does not create duplicate Microsoft skins. The selected skin preview rotates by dragging with the mouse; miniature 3D previews are shown for saved skins. Offline skins are applied directly by Horizon Offline. For ordinary Minecraft Java, GlowstoneCL uses the standalone [OfflineSkinInjector](https://github.com/NaivG/OfflineSkinInjector) Java agent: no Fabric/Forge skin mod is installed and no `mods/` folder entry is needed. Its upstream 0.1.2 JAR is downloaded on demand and checked against a pinned SHA-256 before launch. The injector works at runtime with supported authlib generations across Vanilla and mod-loader clients; the skin is client-side only;
-- a Prism-style build library with a compact create action, a separate create form, context-click creation, and saved favourite profiles;
+- a Prism-style build library with a compact create action, a separate create form, context-click creation, saved favourite profiles, and Java version filters for releases, snapshots, old beta and alpha/classic versions;
 - per-instance settings from the build card: minimum/maximum Java memory, an optional Java executable override, JVM and game arguments, window resolution, environment variables, and the Java mod loader; settings are saved separately for every instance and applied on the next launch;
 - per-instance content management: browse and delete saved worlds, open the saves/screenshots/mods directories, preview and remove screenshots, and manage the Java multiplayer server list through the standard compressed NBT `servers.dat` format. The Create World action launches that profile; the actual world is created in Minecraft's Singleplayer menu;
 - an installed Java mod inventory that scans every JAR in the selected instance's `mods/` folder, including manually copied and modpack files, with safe removal and manifest cleanup for Modrinth/CurseForge-managed entries;
 - subtle animated ambient background lighting, a fade between pages, and animated overlays that also work with user-selected wallpapers;
-- Discord Rich Presence reconnects on application startup, reconnects when its Application ID changes, and switches between launcher and in-game profile status;
+- Discord Rich Presence uses one shared public Application ID embedded at build time, reconnects when the desktop Discord client restarts, and switches between launcher and in-game profile status;
 - a centered live launch diagnostics window for Java and Horizon: CrustCore preparation events, Minecraft `logs/latest.log` tail, Horizon stdout/stderr, final exit status, and copyable error/full-log actions;
 - user-selectable wallpaper images, plus bundled preset discovery from `crates/glowstone-desktop/assets/backgrounds/` (the folder currently contains instructions and awaits artwork);
 - opt-in **local-only diagnostics**: selected launch errors can be stored in `diagnostics/errors.log` after basic token/path redaction; this build does not upload telemetry to a remote server;
-- optional Discord Rich Presence using a user-supplied Discord Application ID;
+
 - a GitHub commit changelog in Settings and News, with automatic checks whenever News is opened and a manual check button; binary self-updating is not available until signed release assets are published;
 - a language selector for Russian and English; primary navigation/profile labels are translated, while full-screen translation remains in progress;
 - persistent Recent Play history for Java and Horizon launches, with quick relaunch actions;
@@ -88,6 +88,14 @@ Run with automatic backend selection (Wayland is preferred when its compositor s
 You can also explicitly request automatic selection with `--backend auto`.
 
 The backend switch applies to GlowstoneCL only. The original `DISPLAY` / `WAYLAND_DISPLAY` value is restored on Java and Horizon game processes, so the game receives the desktop session environment and can select its own supported backend.
+
+## Discord Rich Presence
+
+GlowstoneCL uses **one shared Discord Application ID** for every installation. Players do not need to create their own Discord application or enter an ID. The project maintainer creates the GlowstoneCL application once and supplies its public numeric ID at build time:
+
+    GLOWSTONE_DISCORD_APPLICATION_ID=YOUR_APPLICATION_ID cargo run -p glowstonecl
+
+The Application ID is public and is not a Client Secret. Do not add a Discord Client Secret to the launcher.
 
 ## Local data
 
