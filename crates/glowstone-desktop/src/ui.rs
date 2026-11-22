@@ -2098,7 +2098,7 @@ fn nav_button(
 ) -> Element<'static, Message> {
     let active = page == current;
     let background = if active {
-        Color::from_rgba(0.91, 0.91, 0.89, 0.94)
+        Color::from_rgba(0.34, 0.28, 0.18, 0.78)
     } else {
         Color::TRANSPARENT
     };
@@ -2152,7 +2152,7 @@ fn platform_nav(
         let mut style = button::text(theme, status);
         style.background = Some(
             if active {
-                Color::from_rgba(0.90, 0.93, 0.96, 0.82)
+                Color::from_rgba(0.20, 0.24, 0.30, 0.88)
             } else {
                 Color::TRANSPARENT
             }
@@ -2181,7 +2181,7 @@ fn top_bar(app: &App) -> Element<'_, Message> {
     )
     .padding([2, 14])
     .width(Length::Fill)
-    .style(|_| glass_style(Color::from_rgba(1.0, 1.0, 1.0, 0.77), EDGE));
+    .style(|_| glass_style(Color::from_rgba(0.11, 0.13, 0.17, 0.90), EDGE));
 
     row![
         search,
@@ -4149,9 +4149,9 @@ fn source_tab(label: &'static str, active: bool, message: Message) -> Element<'s
         .style(move |theme, status| {
             let mut style = button::secondary(theme, status);
             style.background = Some(if active {
-                Color::from_rgba(0.91, 0.91, 0.89, 0.96)
+                Color::from_rgba(0.34, 0.28, 0.18, 0.78)
             } else {
-                Color::from_rgba(1.0, 1.0, 1.0, 0.56)
+                Color::from_rgba(0.16, 0.18, 0.22, 0.78)
             }.into());
             style.text_color = if active { TEXT } else { MUTED };
             style.border = Border::default().rounded(12).width(1)
