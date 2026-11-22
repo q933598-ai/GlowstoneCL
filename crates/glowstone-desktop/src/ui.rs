@@ -905,7 +905,84 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 .filter(|line| !line.is_empty()).collect::<Vec<_>>().join("\n");
         }
         Message::InstanceLoaderChanged(loader) => app.instance_settings_loader = loader,
+        Message::RefreshInstanceContent => {
+            if let Some(instance_id) = app.instance_settings_id.clone() {
+                app.instance_worlds = store::list_instance_folder(&instance_id, "saves").unwrap_or_default();
+                app.instance_screenshots = store::list_instance_folder(&instance_id, "screenshots").unwrap_or_default();
+                app.instance_servers = match crate::instance_tools::list_servers(&instance_id) {
+                    Ok(servers) => servers,
+                    Err(error) => {
+                        app.notice = Some(error);
+                        Vec::new()
+                    }
+                };
+                if app.data.instances.iter().any(|item| item.id.0 == instance_id && item.platform == GamePlatform::Java) {
+                    app.local_mod_files = mods::local_files(&instance_id).unwrap_or_default();
+                }
+            }
+        }
+        Message::CreateWorld(instance_id) => {
+            app.notice = Some("Открываю эту сборку. Создание мира выполняется внутри Minecraft: Одиночная игра → Создать новый мир.".to_owned());
+            return update(app, Message::LaunchInstance(instance_id));
+        }
+        Message::DeleteInstanceWorld(instance_id, world_name) => {
+            match store::remove_instance_world(&instance_id, &world_name) {
+                Ok(()) => {
+                    app.instance_worlds = store::list_instance_folder(&instance_id, "saves").unwrap_or_default();
+                    app.notice = Some(format!("Мир «{world_name}» удалён."));
+                }
+                Err(error) => app.notice = Some(error),
+            }
+        }
+        Message::DeleteInstanceScreenshot(instance_id, file_name) => {
+            match store::remove_instance_screenshot(&instance_id, &file_name) {
+                Ok(()) => {
+                    app.instance_screenshots = store::list_instance_folder(&instance_id, "screenshots").unwrap_or_default();
+                    app.notice = Some(format!("Скриншот «{file_name}» удалён."));
+                }
+                Err(error) => app.notice = Some(error),
+            }
+        }
+        Message::OpenInstanceFolder(instance_id, folder) => {
+            app.notice = Some(match store::open_instance_folder(&instance_id, &folder) {
+                Ok(()) => format!("Открываю каталог {folder}."),
+                Err(error) => error,
+            });
+        }
+        Message::ServerNameChanged(value) => app.server_name_input = value,
+        Message::ServerAddressChanged(value) => app.server_address_input = value,
+        Message::AddServer => {
+            let Some(instance_id) = app.instance_settings_id.clone() else { return iced::Task::none() };
+            match crate::instance_tools::add_server(&instance_id, &app.server_name_input, &app.server_address_input) {
+                Ok(servers) => {
+                    app.instance_servers = servers;
+                    app.server_name_input.clear();
+                    app.server_address_input.clear();
+                    app.notice = Some("Сервер добавлен в servers.dat этой сборки.".to_owned());
+                }
+                Err(error) => app.notice = Some(error),
+            }
+        }
+        Message::RemoveServer(instance_id, index) => {
+            match crate::instance_tools::remove_server(&instance_id, index) {
+                Ok(servers) => {
+                    app.instance_servers = servers;
+                    app.notice = Some("Сервер удалён из списка.".to_owned());
+                }
+                Err(error) => app.notice = Some(error),
+            }
+        }
+        Message::RemoveInstalledModFile(instance_id, file_name) => {
+            match mods::remove_file(&instance_id, &file_name) {
+                Ok(()) => {
+                    app.local_mod_files = mods::local_files(&instance_id).unwrap_or_default();
+                    app.notice = Some(format!("Мод {} удалён из сборки.", file_name));
+                }
+                Err(error) => app.notice = Some(error),
+            }
+        }
         Message::OpenInstanceMods(target_id) => {
+            app.local_mod_files = mods::local_files(&target_id).unwrap_or_default();
             let Some(instance) = app.data.instances.iter()
                 .find(|item| item.id.0 == target_id && supports_mod_catalog(item))
                 .cloned()
@@ -987,6 +1064,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     Ok(installed) => {
                         let added = installed.iter().filter(|item| item.dependency).count();
                         app.installed_mods = installed;
+                        app.local_mod_files = mods::local_files(&target_id).unwrap_or_default();
                         app.notice = Some(if added > 0 {
                             format!("Мод установлен. Также добавлено обязательных зависимостей: {added}.")
                         } else {
@@ -1002,6 +1080,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 match mods::remove(&target_id, &project_id) {
                     Ok(installed) => {
                         app.installed_mods = installed;
+                        app.local_mod_files = mods::local_files(&target_id).unwrap_or_default();
                         app.notice = Some("Мод удалён из этой сборки.".to_owned());
                     }
                     Err(error) => app.notice = Some(error),
