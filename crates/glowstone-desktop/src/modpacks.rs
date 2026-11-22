@@ -453,6 +453,7 @@ pub async fn install_project(project_id: String, project_name: String) -> Result
     };
     let mut instance = store::create_instance(
         instance_name,
+        String::new(),
         minecraft,
         GamePlatform::Java,
         loader,
