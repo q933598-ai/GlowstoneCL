@@ -118,7 +118,7 @@ impl<Message> canvas::Program<Message> for SkinPreview {
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let background = canvas::Path::rectangle(Point::ORIGIN, bounds.size());
-        frame.fill(&background, Color::from_rgb8(233, 237, 241));
+        frame.fill(&background, Color::from_rgb8(29, 32, 38));
 
         if self.texture.len() < 64 * 32 {
             return vec![frame.into_geometry()];
