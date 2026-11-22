@@ -1,18 +1,20 @@
 use serde::Deserialize;
 
 const COMMITS_URL: &str =
-    "https://api.github.com/repos/q933598-ai/GlowstoneCL/commits?sha=test%2Fglowstonecl&per_page=8";
+    "https://api.github.com/repos/q933598-ai/GlowstoneCL/commits?sha=test%2Fglowstonecl&per_page=50";
 
 #[derive(Debug, Clone)]
 pub struct UpdateEntry {
     pub message: String,
     pub date: String,
     pub url: String,
+    pub sha: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct GithubCommit {
     html_url: String,
+    sha: String,
     commit: GithubCommitInfo,
 }
 
@@ -54,6 +56,21 @@ pub async fn fetch_recent_changes() -> Result<Vec<UpdateEntry>, String> {
             message: commit.commit.message.lines().next().unwrap_or("Без описания").to_owned(),
             date: commit.commit.author.map(|author| author.date).unwrap_or_default(),
             url: commit.html_url,
+            sha: commit.sha,
         })
         .collect())
+}
+
+
+/// Commit embedded by build.rs so the launcher can determine if its source
+/// branch has advanced since this binary was built.
+pub fn build_sha() -> &'static str {
+    env!("GLOWSTONE_BUILD_SHA")
+}
+
+pub fn update_available(entries: &[UpdateEntry]) -> bool {
+    let current = build_sha();
+    !current.is_empty()
+        && current != "unknown"
+        && !entries.iter().any(|entry| entry.sha == current)
 }
