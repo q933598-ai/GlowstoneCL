@@ -70,6 +70,14 @@ pub struct AppSettings {
     pub microsoft_client_id: String,
     pub selected_account_id: Option<String>,
     pub selected_instance_id: Option<String>,
+    /// User-selected local wallpaper. No image data is copied or uploaded.
+    pub background_image: Option<String>,
+    /// Opt-in local error diagnostics. Nothing is transmitted to a server.
+    pub telemetry_enabled: bool,
+    pub language: String,
+    pub discord_rpc_enabled: bool,
+    pub discord_client_id: String,
+    pub show_update_notes: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
