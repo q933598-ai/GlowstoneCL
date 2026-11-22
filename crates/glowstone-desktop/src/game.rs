@@ -759,7 +759,10 @@ async fn launch_java(
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
     use std::io::SeekFrom;
     let mut game_log_file = tokio::fs::File::open(&game_log_path).await.ok();
-    let mut last_log_len = 0u64;
+    let mut last_log_len = match game_log_file.as_ref() {
+        Some(file) => file.metadata().await.map(|metadata| metadata.len()).unwrap_or(0),
+        None => 0,
+    };
     let mut log_poll = tokio::time::interval(std::time::Duration::from_millis(1_000));
     let status = loop {
         tokio::select! {
