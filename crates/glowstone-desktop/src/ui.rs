@@ -6337,7 +6337,7 @@ fn play_hover_sound() {
     #[cfg(target_os = "windows")]
     {
         #[link(name = "user32")]
-        extern "system" { fn MessageBeep(kind: u32) -> i32; }
+        unsafe extern "system" { fn MessageBeep(kind: u32) -> i32; }
         unsafe { let _ = MessageBeep(0x40); }
     }
     #[cfg(target_os = "macos")]
