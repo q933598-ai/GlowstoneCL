@@ -376,8 +376,8 @@ impl Default for App {
             instance_name: String::new(),
             instance_description: String::new(),
             instance_version: "stable".to_owned(),
-            create_memory_min: "1G".to_owned(),
-            create_memory_max: "4G".to_owned(),
+            create_memory_min: String::new(),
+            create_memory_max: String::new(),
             create_java_path: String::new(),
             version_query: String::new(),
             version_choices: Vec::new(),
@@ -1347,9 +1347,14 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             let name = app.instance_name.trim().to_owned();
             let description = app.instance_description.trim().to_owned();
             let version = app.instance_version.trim().to_owned();
+            let (automatic_min, automatic_max) = if app.loader == LoaderKind::Vanilla {
+                ("1G", "4G")
+            } else {
+                ("2G", "6G")
+            };
             let settings = store::InstanceSettings {
-                memory_min: if app.create_memory_min.trim().is_empty() { "1G".to_owned() } else { app.create_memory_min.trim().to_owned() },
-                memory_max: if app.create_memory_max.trim().is_empty() { "4G".to_owned() } else { app.create_memory_max.trim().to_owned() },
+                memory_min: if app.create_memory_min.trim().is_empty() { automatic_min.to_owned() } else { app.create_memory_min.trim().to_owned() },
+                memory_max: if app.create_memory_max.trim().is_empty() { automatic_max.to_owned() } else { app.create_memory_max.trim().to_owned() },
                 java_path: app.create_java_path.trim().to_owned(),
                 ..store::InstanceSettings::default()
             };
@@ -1376,8 +1381,8 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                             app.instance_name.clear();
                             app.instance_description.clear();
                             app.create_java_path.clear();
-                            app.create_memory_min = "1G".to_owned();
-                            app.create_memory_max = "4G".to_owned();
+                            app.create_memory_min.clear();
+                            app.create_memory_max.clear();
                             app.show_instance_creator = false;
                             app.notice = Some("Сборка создана и сохранена.".into());
                         }
@@ -3753,11 +3758,11 @@ fn instances_page(app: &App) -> Element<'_, Message> {
                     row![
                         column![
                             text("Минимум").size(8).color(SUBTLE),
-                            text_input("1G", &app.create_memory_min).on_input(Message::CreateMemoryMinChanged).padding(9).size(10),
+                            text_input(if app.loader == LoaderKind::Vanilla { "Авто — 1G" } else { "Авто — 2G" }, &app.create_memory_min).on_input(Message::CreateMemoryMinChanged).padding(9).size(10),
                         ].spacing(4).width(Length::Fill),
                         column![
                             text("Максимум").size(8).color(SUBTLE),
-                            text_input("4G", &app.create_memory_max).on_input(Message::CreateMemoryMaxChanged).padding(9).size(10),
+                            text_input(if app.loader == LoaderKind::Vanilla { "Авто — 4G" } else { "Авто — 6G" }, &app.create_memory_max).on_input(Message::CreateMemoryMaxChanged).padding(9).size(10),
                         ].spacing(4).width(Length::Fill),
                     ].spacing(8),
                 ].spacing(7)
@@ -3953,6 +3958,11 @@ fn instance_card(instance: &GameInstance, selected: bool) -> Element<'static, Me
             .style(|_| glass_style(PANEL_LIGHT, EDGE)),
             column![
                 text(instance.name.clone()).size(12).color(TEXT),
+                if instance.description.trim().is_empty() {
+                    text(format!("{} · {} · {}", platform, instance.game_version, loader_label(instance.loader))).size(9).color(MUTED)
+                } else {
+                    text(instance.description.clone()).size(8).color(SUBTLE)
+                },
                 text(format!("{} · {} · {}", platform, instance.game_version, loader_label(instance.loader)))
                     .size(9)
                     .color(MUTED),
@@ -4042,11 +4052,6 @@ fn instance_settings_page(app: &App) -> Element<'_, Message> {
         ].spacing(8),
         text("ПУТЬ К ФАЙЛУ JAVA. Например: /usr/lib/jvm/java-25-openjdk/bin/java")
             .size(8).color(SUBTLE),
-        choice_button(
-            "Сворачивать лаунчер в трей при запуске этой сборки",
-            app.instance_settings.minimize_to_tray_on_launch,
-            Message::ToggleInstanceMinimizeToTray(!app.instance_settings.minimize_to_tray_on_launch),
-        ),
         choice_button(
             "Сворачивать лаунчер в трей при запуске этой сборки",
             app.instance_settings.minimize_to_tray_on_launch,
@@ -6269,7 +6274,11 @@ fn icon(
                 "microsoft" => "M3 3h8v8H3z M13 3h8v8h-8z M3 13h8v8H3z M13 13h8v8h-8z",
                 "loader" => "M20 12a8 8 0 1 1-2.3-5.7",
                 "java" => "M6 3c-2 4 3 5 0 9 M12 2c-2 4 3 6 0 10 M18 3c-2 4 3 5 0 9 M5 15h14l-2 5H7l-2-5Z M3 22h18",
-                "forge" | "curseforge" => "M12 2c3 4-2 6 1 9 2-2 4-3 4-6 4 5 5 10 1 14-4 4-11 3-13-2-2-4 0-9 4-12 0 4 1 5 3 6 1-3-1-5 0-9Z",
+                "refresh-cw" => "M20 7v5h-5 M4 17v-5h5 M5.6 9a7 7 0 0 1 12-2L20 12 M4 12l2.4 5a7 7 0 0 0 12-2",
+                "fabric" => "M4 5h16v14H4z M8 5v14 M16 5v14 M4 10h16 M4 15h16",
+                "neoforge" => "M5 19V5l14 14V5",
+                "quilt" => "M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z M7 7l10 10",
+                                "forge" | "curseforge" => "M12 2c3 4-2 6 1 9 2-2 4-3 4-6 4 5 5 10 1 14-4 4-11 3-13-2-2-4 0-9 4-12 0 4 1 5 3 6 1-3-1-5 0-9Z",
                 "horizon" => "M3 18 8 6l4 8 4-8 5 12 M3 18h18",
                 "modrinth" => "M12 2 22 12 12 22 2 12 12 2Z M12 6 18 12 12 18 6 12 12 6Z",
                 _ => "M4 4h16v16H4z",
