@@ -208,6 +208,8 @@ pub enum Message {
     ToggleInstanceMinimizeToTray(bool),
     CheckDiscordDiagnostics,
     DiscordDiagnosticsLoaded(String),
+    OpenDiscordDeveloperPortal,
+    OpenCurseForgeApiApplication,
     HoverButton,
     PollTray,
     RestoreFromTray,
@@ -2302,6 +2304,18 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 Err(error) => format!("Не удалось открыть GitHub: {error}"),
             });
         }
+        Message::OpenDiscordDeveloperPortal => {
+            app.notice = Some(match webbrowser::open("https://discord.com/developers/applications") {
+                Ok(()) => "Открываю Discord Developer Portal. Создай приложение и скопируй Application ID.".to_owned(),
+                Err(error) => format!("Не удалось открыть Discord Developer Portal: {error}"),
+            });
+        }
+        Message::OpenCurseForgeApiApplication => {
+            app.notice = Some(match webbrowser::open("https://support.curseforge.com/support/solutions/articles/9000208346-about-the-curseforge-api-and-how-to-apply-for-a-key?locale=en") {
+                Ok(()) => "Открываю официальную инструкцию CurseForge по получению API key.".to_owned(),
+                Err(error) => format!("Не удалось открыть инструкцию CurseForge: {error}"),
+            });
+        }
         Message::Info(message) => app.notice = Some(message.to_owned()),
     }
 
@@ -3906,8 +3920,6 @@ fn instances_page(app: &App) -> Element<'_, Message> {
     base
 }
 
-}
-
 fn loader_button(loader: LoaderKind, current: LoaderKind) -> Element<'static, Message> {
     let active = loader == current;
     button(
@@ -5063,9 +5075,10 @@ fn settings_page(app: &App) -> Element<'_, Message> {
                 .spacing(7)
                 .align_y(Alignment::Center),
                 row![
+                    quiet_button("Developer Portal", Message::OpenDiscordDeveloperPortal),
                     quiet_button("Проверить IPC", Message::CheckDiscordDiagnostics),
-                    text(app.discord_diagnostics.clone()).size(8).color(SUBTLE),
                 ].spacing(8).align_y(Alignment::Center),
+                text(app.discord_diagnostics.clone()).size(8).color(SUBTLE),
             ]
             .spacing(8)
             .into(),
@@ -5118,6 +5131,9 @@ fn settings_page(app: &App) -> Element<'_, Message> {
                         .size(10)
                         .width(Length::Fill),
                     primary_button("Сохранить", Message::SaveCurseForgeApiKey),
+                ].spacing(8),
+                row![
+                    quiet_button("Как получить API key", Message::OpenCurseForgeApiApplication),
                 ].spacing(8),
             ].spacing(9)
         )
