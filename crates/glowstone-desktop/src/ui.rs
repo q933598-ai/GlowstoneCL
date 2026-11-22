@@ -297,6 +297,7 @@ pub struct App {
     server_name_input: String,
     server_address_input: String,
     local_mod_files: Vec<mods::InstalledModFile>,
+    mod_icon_handles: HashMap<String, image::Handle>,
     installed_mod_filter: String,
     installed_mods_visible: usize,
     update_available: bool,
@@ -445,6 +446,7 @@ impl Default for App {
             server_name_input: String::new(),
             server_address_input: String::new(),
             local_mod_files: Vec::new(),
+            mod_icon_handles: HashMap::new(),
             installed_mod_filter: String::new(),
             installed_mods_visible: 24,
             update_available: false,
@@ -1096,6 +1098,11 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             {
                 match result {
                     Ok(files) => {
+                        app.mod_icon_handles = files.iter()
+                            .filter_map(|item| item.icon_data.as_ref().map(|bytes| {
+                                (item.file_name.clone(), image::Handle::from_bytes(bytes.clone()))
+                            }))
+                            .collect();
                         app.local_mod_files = files;
                         app.installed_mods_visible = 24;
                     }
@@ -4185,7 +4192,7 @@ fn instance_settings_page(app: &App) -> Element<'_, Message> {
             for item in &app.local_mod_files {
                 mods_list = mods_list.push(
                     row![
-                        mod_icon(item.icon_data.clone(), item.title.clone()),
+                        mod_icon_handle(app.mod_icon_handles.get(&item.file_name).cloned(), item.title.clone()),
                         column![
                             text(item.title.clone()).size(10).color(TEXT),
                             text(format!("{} · {} · {}", item.version, item.file_name, format_file_size(item.size)))
@@ -5136,6 +5143,25 @@ fn settings_card(
     .into()
 }
 
+
+fn mod_icon_handle(handle: Option<image::Handle>, fallback: String) -> Element<'static, Message> {
+    if let Some(handle) = handle {
+        return image::Image::new(handle)
+            .width(Length::Fixed(48.0))
+            .height(Length::Fixed(48.0))
+            .content_fit(ContentFit::Cover)
+            .border_radius(10.0)
+            .into();
+    }
+    let letter = fallback.chars().next().unwrap_or('M').to_uppercase().to_string();
+    container(text(letter).size(20).color(CYAN))
+        .width(48)
+        .height(48)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(|_| glass_style(CYAN_DARK, EDGE))
+        .into()
+}
 
 fn mod_icon(bytes: Option<Vec<u8>>, fallback: String) -> Element<'static, Message> {
     if let Some(bytes) = bytes {
