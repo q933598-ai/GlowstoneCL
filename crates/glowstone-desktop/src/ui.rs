@@ -1006,6 +1006,9 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         Message::InstanceResolutionHeightChanged(value) => app.instance_settings.resolution_height = value,
         Message::InstanceEnvironmentChanged(value) => app.instance_settings.environment_variables = value,
         Message::InstanceLoaderChanged(loader) => app.instance_settings_loader = loader,
+        Message::ToggleInstanceMinimizeToTray(enabled) => {
+            app.instance_settings.minimize_to_tray_on_launch = enabled;
+        }
         Message::RefreshInstanceContent => {
             if let Some(instance_id) = app.instance_settings_id.clone() {
                 app.instance_worlds = store::list_instance_folder(&instance_id, "saves").unwrap_or_default();
@@ -1275,6 +1278,27 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             }
         }
         Message::InstanceNameChanged(value) => app.instance_name = value,
+        Message::InstanceDescriptionChanged(value) => app.instance_description = value,
+        Message::CreateMemoryMinChanged(value) => app.create_memory_min = value,
+        Message::CreateMemoryMaxChanged(value) => app.create_memory_max = value,
+        Message::CreateJavaPathChanged(value) => app.create_java_path = value,
+        Message::PickCreateJava => {
+            return iced::Task::perform(
+                async {
+                    rfd::AsyncFileDialog::new()
+                        .set_title("Выбери Java executable")
+                        .pick_file()
+                        .await
+                        .map(|file| file.path().to_string_lossy().into_owned())
+                },
+                Message::CreateJavaPicked,
+            );
+        }
+        Message::CreateJavaPicked(path) => {
+            if let Some(path) = path {
+                app.create_java_path = path;
+            }
+        }
         Message::InstanceVersionChanged(value) => app.instance_version = value,
         Message::VersionQueryChanged(value) => app.version_query = value,
         Message::VersionSelected(value) => {
@@ -1324,28 +1348,48 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         }
         Message::CreateInstance => {
             let name = app.instance_name.trim().to_owned();
+            let description = app.instance_description.trim().to_owned();
             let version = app.instance_version.trim().to_owned();
+            let settings = store::InstanceSettings {
+                memory_min: if app.create_memory_min.trim().is_empty() { "1G".to_owned() } else { app.create_memory_min.trim().to_owned() },
+                memory_max: if app.create_memory_max.trim().is_empty() { "4G".to_owned() } else { app.create_memory_max.trim().to_owned() },
+                java_path: app.create_java_path.trim().to_owned(),
+                ..store::InstanceSettings::default()
+            };
 
             if name.is_empty() || version.is_empty() {
                 app.notice = Some("Укажи название сборки и версию Minecraft.".into());
-            } else {
-                match store::create_instance(name, version, app.platform.into(), app.loader) {
-                    Ok(instance) => {
-                        app.data.settings.selected_instance_id = Some(instance.id.0.clone());
-                        app.data.instances.push(instance);
-                        match store::save(&app.data) {
-                            Ok(()) => {
-                                app.instance_name.clear();
-                                app.show_instance_creator = false;
-                                app.notice = Some("Сборка создана и сохранена.".into());
-                            }
-                            Err(error) => {
-                                app.notice = Some(format!("Сборка создана в памяти, но не сохранена: {error}"));
-                            }
+                return iced::Task::none();
+            }
+            if let Err(error) = settings.validate() {
+                app.notice = Some(error);
+                return iced::Task::none();
+            }
+            match store::create_instance(name, description, version, app.platform.into(), app.loader) {
+                Ok(instance) => {
+                    let instance_id = instance.id.0.clone();
+                    if let Err(error) = store::save_instance_settings(&instance_id, &settings) {
+                        app.notice = Some(format!("Сборка создана, но настройки Java не сохранены: {error}"));
+                        return iced::Task::none();
+                    }
+                    app.data.settings.selected_instance_id = Some(instance_id);
+                    app.data.instances.push(instance);
+                    match store::save(&app.data) {
+                        Ok(()) => {
+                            app.instance_name.clear();
+                            app.instance_description.clear();
+                            app.create_java_path.clear();
+                            app.create_memory_min = "1G".to_owned();
+                            app.create_memory_max = "4G".to_owned();
+                            app.show_instance_creator = false;
+                            app.notice = Some("Сборка создана и сохранена.".into());
+                        }
+                        Err(error) => {
+                            app.notice = Some(format!("Сборка создана в памяти, но не сохранена: {error}"));
                         }
                     }
-                    Err(error) => app.notice = Some(error),
                 }
+                Err(error) => app.notice = Some(error),
             }
             app.page = Page::Instances;
         }
