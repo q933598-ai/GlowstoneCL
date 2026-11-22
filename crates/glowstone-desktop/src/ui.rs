@@ -3944,6 +3944,11 @@ fn instance_card(instance: &GameInstance, selected: bool) -> Element<'static, Me
         InstanceState::Updating => "Обновляется",
     };
     let account_id = instance.id.0.clone();
+    let description: Element<'static, Message> = if instance.description.trim().is_empty() {
+        Space::new().height(Length::Fixed(0.0)).into()
+    } else {
+        text(instance.description.clone()).size(8).color(SUBTLE).into()
+    };
     let mods_action: Element<'static, Message> = if supports_mod_catalog(instance) {
         quiet_button("Моды", Message::OpenInstanceMods(account_id.clone()))
     } else {
@@ -3964,11 +3969,7 @@ fn instance_card(instance: &GameInstance, selected: bool) -> Element<'static, Me
             .style(|_| glass_style(PANEL_LIGHT, EDGE)),
             column![
                 text(instance.name.clone()).size(12).color(TEXT),
-                if instance.description.trim().is_empty() {
-                    Space::new().height(0).into()
-                } else {
-                    text(instance.description.clone()).size(8).color(SUBTLE).into()
-                },
+                description,
                 text(format!("{} · {} · {}", platform, instance.game_version, loader_label(instance.loader)))
                     .size(9)
                     .color(MUTED),
@@ -4036,7 +4037,7 @@ fn instance_settings_page(app: &App) -> Element<'_, Message> {
         loader_row = loader_row.push(loader_button(*loader, app.instance_settings_loader));
     }
 
-    let mut launch_controls = column![
+    let launch_controls = column![
         text("ПАМЯТЬ JVM").size(9).color(CYAN),
         row![
             column![
@@ -6135,7 +6136,7 @@ fn action_button_content(
 }
 
 fn primary_button(label: &'static str, message: Message) -> Element<'static, Message> {
-    let control: Element<'static, Message> = button(action_button_content(label, CYAN, 10))
+    let control: Element<'static, Message> = button(action_button_content(label, CYAN, 10.0))
         .on_press(message)
         .padding([10, 15])
         .style(|theme, status| {
@@ -6162,7 +6163,7 @@ fn primary_button(label: &'static str, message: Message) -> Element<'static, Mes
 }
 
 fn tonal_button(label: &'static str, message: Message) -> Element<'static, Message> {
-    let control: Element<'static, Message> = button(action_button_content(label, MUTED, 9))
+    let control: Element<'static, Message> = button(action_button_content(label, MUTED, 9.0))
         .on_press(message)
         .padding([10, 14])
         .style(|theme, status| {
@@ -6184,7 +6185,7 @@ fn tonal_button(label: &'static str, message: Message) -> Element<'static, Messa
 }
 
 fn quiet_button(label: &'static str, message: Message) -> Element<'static, Message> {
-    let control: Element<'static, Message> = button(action_button_content(label, MUTED, 9))
+    let control: Element<'static, Message> = button(action_button_content(label, MUTED, 9.0))
         .on_press(message)
         .padding([10, 14])
         .style(|theme, status| {
