@@ -708,8 +708,28 @@ async fn launch_java(
     let plan = launch
         .plan(&prepared)
         .map_err(|error| format!("Не удалось сформировать команду запуска: {error}"))?;
-    let mut child = launch
-        .spawn(&plan)
+    // Spawn the prepared launch plan ourselves so the display variables removed
+    // for the launcher's forced Winit backend can be restored for Minecraft only.
+    fs::create_dir_all(&plan.working_dir)
+        .map_err(|error| format!("Не удалось создать папку игры: {error}"))?;
+    let mut child_command = TokioCommand::new(&plan.java);
+    child_command
+        .args(&plan.args)
+        .current_dir(&plan.working_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    #[cfg(target_os = "linux")]
+    crate::restore_child_display_environment(&mut child_command);
+
+    if launch.options().detached {
+        #[cfg(unix)]
+        child_command.process_group(0);
+        #[cfg(windows)]
+        child_command.creation_flags(0x0000_0008);
+    }
+    let mut child = child_command
+        .spawn()
         .map_err(|error| format!("Не удалось запустить Java: {error}"))?;
     if let Err(error) = store::record_recent_play(&instance.id.0) {
         push_launch_log(&log, format!("Предупреждение: не удалось сохранить историю запусков: {error}"));
@@ -1778,6 +1798,9 @@ async fn launch_horizon_client(
                 );
         }
     }
+
+    #[cfg(target_os = "linux")]
+    crate::restore_child_display_environment(&mut command);
 
     let mut child = command
         .spawn()
