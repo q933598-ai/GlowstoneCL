@@ -3844,7 +3844,7 @@ fn update_notes_panel(app: &App) -> Element<'_, Message> {
     .into()
 }
 
-fn preference_panel(title: &'static str, description: &'static str, content: Element<'static, Message>) -> Element<'static, Message> {
+fn preference_panel<'a>(title: &'static str, description: &'static str, content: Element<'a, Message>) -> Element<'a, Message> {
     container(
         column![
             text(title).size(12).color(TEXT),
