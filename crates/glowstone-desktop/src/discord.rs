@@ -52,21 +52,20 @@ pub fn set_presence(
         guard.application_id = Some(application_id.to_owned());
     }
 
-    let connected = guard.client
+    let activity_result = guard.client
         .as_mut()
-        .ok_or_else(|| "Discord RPC не создал соединение.".to_owned())?;
-
-    connected
+        .ok_or_else(|| "Discord RPC не создал соединение.".to_owned())?
         .set_activity(
             activity::Activity::new()
                 .details(truncate(details, 128))
                 .state(truncate(state, 128)),
-        )
-        .map_err(|error| {
-            guard.client = None;
-            guard.application_id = None;
-            format!("Не удалось обновить Discord Rich Presence: {error}")
-        })?;
+        );
+
+    if let Err(error) = activity_result {
+        guard.client = None;
+        guard.application_id = None;
+        return Err(format!("Не удалось обновить Discord Rich Presence: {error}"));
+    }
 
     Ok("Discord Rich Presence подключён.".to_owned())
 }
