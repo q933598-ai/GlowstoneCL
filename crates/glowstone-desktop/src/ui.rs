@@ -4756,23 +4756,24 @@ fn curseforge_catalog_page(app: &App) -> Element<'_, Message> {
     )).unwrap_or_else(|| "Сборка не выбрана".to_owned());
 
     let mut installed = column![].spacing(7);
-    if app.curseforge_installed_mods.is_empty() {
-        installed = installed.push(text("В этой сборке пока нет управляемых CurseForge-модов.").size(9).color(SUBTLE));
+    if app.local_mod_files.is_empty() {
+        installed = installed.push(text("В папке mods пока нет JAR-файлов.").size(9).color(SUBTLE));
     } else {
-        for item in &app.curseforge_installed_mods {
+        for item in &app.local_mod_files {
             installed = installed.push(
                 container(
                     row![
-                        mod_icon(None, item.name.clone()),
+                        icon("puzzle", PURPLE, 16.0),
                         column![
-                            text(item.name.clone()).size(10).color(TEXT),
-                            text(format!("{} · {}", item.version, item.file_name)).size(8).color(MUTED),
-                            text("CURSEFORGE").size(7).color(ORANGE),
+                            text(item.title.clone()).size(10).color(TEXT),
+                            text(format!("{} · {} · {}", item.version, item.file_name, format_file_size(item.size))).size(8).color(MUTED),
+                            text(if item.managed { "УПРАВЛЯЕТСЯ GLOWSTONECL" } else { "РУЧНОЙ / MODPACK" })
+                                .size(7).color(if item.managed { GREEN } else { SUBTLE }),
                         ].spacing(3),
                         Space::new().width(Length::Fill),
-                        quiet_button("Удалить", Message::RemoveCurseForgeMod(
+                        quiet_button("Удалить", Message::RemoveInstalledModFile(
                             app.mod_target_instance.clone().unwrap_or_default(),
-                            item.mod_id, item.file_id,
+                            item.file_name.clone(),
                         )),
                     ].align_y(Alignment::Center).spacing(8)
                 )
@@ -4847,9 +4848,9 @@ fn curseforge_catalog_page(app: &App) -> Element<'_, Message> {
         content = content.push(
             column![
                 row![
-                    text("УСТАНОВЛЕННЫЕ CURSEFORGE-МОДЫ").size(9).color(ORANGE),
+                    text("УСТАНОВЛЕННЫЕ МОДЫ ЭТОЙ СБОРКИ").size(9).color(ORANGE),
                     Space::new().width(Length::Fill),
-                    text(format!("{}", app.curseforge_installed_mods.len())).size(9).color(MUTED),
+                    text(format!("{}", app.local_mod_files.len())).size(9).color(MUTED),
                 ].align_y(Alignment::Center),
                 installed,
             ].spacing(8)
