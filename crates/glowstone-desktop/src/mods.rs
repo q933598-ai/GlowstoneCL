@@ -395,6 +395,8 @@ fn read_mod_jar_metadata(path: &Path) -> (String, String, Option<Vec<u8>>) {
     let Ok(mut archive) = zip::ZipArchive::new(file) else {
         return (fallback, "unknown".to_owned(), None);
     };
+
+    // Fabric and Quilt define icon paths directly in their JSON metadata.
     for metadata_path in ["fabric.mod.json", "quilt.mod.json"] {
         let Ok(mut metadata_file) = archive.by_name(metadata_path) else { continue };
         let mut content = String::new();
@@ -409,20 +411,56 @@ fn read_mod_jar_metadata(path: &Path) -> (String, String, Option<Vec<u8>>) {
                     icons.iter().next().and_then(|(_, path)| path.as_str())
                 })
             });
-            let icon_data = icon_path.and_then(|icon_path| {
-                let mut icon_file = archive.by_name(icon_path).ok()?;
-                let mut bytes = Vec::new();
-                icon_file.take((MAX_ICON_BYTES + 1) as u64).read_to_end(&mut bytes).ok()?;
-                if bytes.len() <= MAX_ICON_BYTES && looks_like_image(&bytes) {
-                    Some(bytes)
-                } else {
-                    None
-                }
-            });
+            let icon_data = icon_path.and_then(|icon_path| read_embedded_icon(&mut archive, icon_path));
             return (name, version, icon_data);
         }
     }
+
+    // Forge and NeoForge store metadata in TOML. logoFile is optional, but
+    // when present it points to an image embedded in the same JAR.
+    for metadata_path in ["META-INF/mods.toml", "META-INF/neoforge.mods.toml"] {
+        let Ok(mut metadata_file) = archive.by_name(metadata_path) else { continue };
+        let mut content = String::new();
+        if metadata_file.read_to_string(&mut content).is_err() { continue; }
+        drop(metadata_file);
+        let first_mod = content.split("[[mods]]").nth(1).unwrap_or(&content);
+        let name = toml_string_value(first_mod, "displayName")
+            .or_else(|| toml_string_value(first_mod, "modId"))
+            .unwrap_or_else(|| fallback.clone());
+        let version = toml_string_value(first_mod, "version")
+            .unwrap_or_else(|| "unknown".to_owned());
+        let icon_data = toml_string_value(first_mod, "logoFile")
+            .and_then(|icon_path| read_embedded_icon(&mut archive, &icon_path));
+        return (name, version, icon_data);
+    }
+
     (fallback, "metadata unavailable".to_owned(), None)
+}
+
+fn toml_string_value(section: &str, key: &str) -> Option<String> {
+    section.lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#'))
+        .find_map(|line| {
+            let (name, value) = line.split_once('=')?;
+            if name.trim() != key { return None; }
+            let value = value.trim();
+            let value = value.strip_prefix('"').and_then(|value| value.strip_suffix('"'))
+                .or_else(|| value.strip_prefix('\'').and_then(|value| value.strip_suffix('\'')))?;
+            (!value.is_empty()).then(|| value.to_owned())
+        })
+}
+
+fn read_embedded_icon(archive: &mut zip::ZipArchive<std::fs::File>, path: &str) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+    let mut file = archive.by_name(path).ok()?;
+    let mut bytes = Vec::new();
+    file.take((MAX_ICON_BYTES + 1) as u64).read_to_end(&mut bytes).ok()?;
+    if bytes.len() <= MAX_ICON_BYTES && looks_like_image(&bytes) {
+        Some(bytes)
+    } else {
+        None
+    }
 }
 
 /// Safely removes one JAR by its file name. Manifest entries are pruned by the
