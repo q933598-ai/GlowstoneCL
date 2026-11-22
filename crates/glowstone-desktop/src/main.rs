@@ -8,6 +8,7 @@ mod mods;
 mod modpacks;
 mod store;
 mod skin_preview;
+mod discord;
 mod ui;
 
 fn main() -> iced::Result {
@@ -16,7 +17,7 @@ fn main() -> iced::Result {
     iced::application(ui::App::default, ui::update, ui::view)
         .subscription(ui::subscription)
         .title("GlowstoneCL")
-        .theme(iced::Theme::Light)
+        .theme(iced::Theme::Dark)
         .font(include_bytes!("../assets/fonts/Monocraft.ttf").as_slice())
         .default_font(iced::Font::with_name("Monocraft"))
         .window_size(iced::Size::new(1600.0, 900.0))
