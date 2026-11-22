@@ -398,6 +398,22 @@ fn read_mod_jar_metadata(path: &Path) -> (String, String) {
 pub fn remove_file(instance_id: &str, file_name: &str) -> Result<(), String> {
     let file_name = safe_filename(file_name)
         .ok_or_else(|| "Недопустимое имя JAR-файла.".to_owned())?;
+
+    // Preserve manifest integrity when the file was installed through one of the
+    // supported catalogues; otherwise it is treated as a manually copied mod.
+    if let Some(item) = installed(instance_id)?.into_iter()
+        .find(|item| item.file_name == file_name)
+    {
+        remove(instance_id, &item.project_id)?;
+        return Ok(());
+    }
+    if let Some(item) = crate::curseforge::installed(instance_id)?.into_iter()
+        .find(|item| item.file_name == file_name)
+    {
+        crate::curseforge::remove(instance_id, item.mod_id, item.file_id)?;
+        return Ok(());
+    }
+
     let path = store::instance_directory(instance_id)?.join("mods").join(file_name);
     let metadata = std::fs::symlink_metadata(&path)
         .map_err(|error| format!("Не удалось найти файл мода: {error}"))?;
