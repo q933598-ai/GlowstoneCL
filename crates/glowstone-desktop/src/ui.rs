@@ -1615,11 +1615,9 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         }
         Message::OpenLaunchConsole => app.launch_console_open = true,
         Message::CloseLaunchConsole => {
-            if app.launch_busy.is_none() {
-                app.launch_console_open = false;
-            } else {
-                app.notice = Some("Окно диагностики можно закрыть после завершения запуска.".to_owned());
-            }
+            // Hiding the window never cancels the game process; the log remains available
+            // from the Downloads page and can be reopened at any time.
+            app.launch_console_open = false;
         }
         Message::CopyLaunchLog => {
             let contents = app.launch_output.join("\n");
@@ -3392,8 +3390,6 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
         .spacing(12)
         .into();
     };
-    let account_uuid = account.uuid.clone();
-
     let import_panel = container(
         column![
             row![
@@ -4829,11 +4825,10 @@ fn launch_debug_window(app: &App) -> Element<'_, Message> {
         Space::new().height(0).into()
     };
 
-    let close_action: Element<'_, Message> = if app.launch_busy.is_none() {
-        quiet_button("Закрыть", Message::CloseLaunchConsole)
-    } else {
-        status_chip("ЗАПУСК ИДЁТ", CYAN_DARK, CYAN)
-    };
+    let close_action: Element<'_, Message> = quiet_button(
+        if app.launch_busy.is_some() { "Свернуть" } else { "Закрыть" },
+        Message::CloseLaunchConsole,
+    );
 
     let panel = container(
         column![
