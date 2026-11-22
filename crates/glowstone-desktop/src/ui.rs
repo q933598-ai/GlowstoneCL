@@ -4941,6 +4941,11 @@ fn downloads_page(app: &App) -> Element<'_, Message> {
 
     column![
         section_header("ЗАГРУЗКИ", "Состояние операций установщика и запуска."),
+        if app.launch_output.is_empty() {
+            Space::new().height(0).into()
+        } else {
+            quiet_button("Открыть журнал последнего запуска", Message::OpenLaunchConsole)
+        },
         activity,
         container(
             column![
