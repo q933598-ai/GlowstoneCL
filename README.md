@@ -91,11 +91,11 @@ The backend switch applies to GlowstoneCL only. The original `DISPLAY` / `WAYLAN
 
 ## Discord Rich Presence
 
-GlowstoneCL uses **one shared Discord Application ID** for every installation. Players do not need to create their own Discord application or enter an ID. The project maintainer creates the GlowstoneCL application once and supplies its public numeric ID at build time:
+GlowstoneCL can use one maintainer-configured Discord Application ID. Players do not need to create their own Discord application or enter an ID. To keep Discord developer credentials out of this public source repository, provide the ID through the runtime environment on the machine that launches GlowstoneCL:
 
     GLOWSTONE_DISCORD_APPLICATION_ID=YOUR_APPLICATION_ID cargo run -p glowstonecl
 
-The Application ID is public and is not a Client Secret. Do not add a Discord Client Secret to the launcher.
+The variable must also be present when launching a prebuilt binary. If it is missing or invalid, the RPC toggle remains unavailable. Never put a Discord Client Secret in the launcher.
 
 ## Local data
 
