@@ -16,19 +16,23 @@ mod ui;
 fn main() -> iced::Result {
     apply_linux_backend_override();
 
-    iced::application(ui::App::default, ui::update, ui::view)
-        .subscription(ui::subscription)
-        .title("GlowstoneCL")
-        .theme(iced::Theme::Dark)
-        .font(include_bytes!("../assets/fonts/Monocraft.ttf").as_slice())
-        .default_font(iced::Font::with_name("Monocraft"))
-        .window_size(iced::Size::new(1600.0, 900.0))
-        .centered()
-        .run_with(|| {
+    iced::application(
+        || {
             let app = ui::App::default();
             let startup = ui::initial_task(&app);
             (app, startup)
-        })
+        },
+        ui::update,
+        ui::view,
+    )
+    .subscription(ui::subscription)
+    .title("GlowstoneCL")
+    .theme(iced::Theme::Dark)
+    .font(include_bytes!("../assets/fonts/Monocraft.ttf").as_slice())
+    .default_font(iced::Font::with_name("Monocraft"))
+    .window_size(iced::Size::new(1600.0, 900.0))
+    .centered()
+    .run()
 }
 
 #[cfg(target_os = "linux")]
