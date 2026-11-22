@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use iced::widget::{
     button, canvas, column, container, image, mouse_area, row, rule, scrollable, stack, svg, text,
@@ -16,23 +17,24 @@ use crate::modpacks;
 use crate::horizon_mods;
 use crate::mods;
 use crate::store::{self, AccountKind, AccountProfile, PersistedState};
+use crate::updates::{self, UpdateEntry};
 
-const BG: Color = Color::from_rgb8(242, 242, 239);
-const SIDEBAR: Color = Color::from_rgba(0.985, 0.985, 0.98, 0.90);
-const PANEL: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.73);
-const PANEL_LIGHT: Color = Color::from_rgba(0.955, 0.955, 0.945, 0.86);
-const TEXT: Color = Color::from_rgb8(47, 54, 62);
-const MUTED: Color = Color::from_rgb8(108, 112, 111);
-const SUBTLE: Color = Color::from_rgb8(142, 145, 142);
-const CYAN: Color = Color::from_rgb8(105, 108, 108);
-const CYAN_DARK: Color = Color::from_rgb8(231, 232, 228);
-const PURPLE: Color = Color::from_rgb8(157, 145, 128);
-const GREEN: Color = Color::from_rgb8(93, 151, 111);
-const ORANGE: Color = Color::from_rgb8(191, 137, 94);
-const RED: Color = Color::from_rgb8(190, 101, 111);
-const EDGE: Color = Color::from_rgba(0.36, 0.36, 0.34, 0.16);
-const EDGE_BRIGHT: Color = Color::from_rgba(0.47, 0.48, 0.45, 0.34);
-const DIVIDER: Color = Color::from_rgba(0.36, 0.36, 0.34, 0.13);
+const BG: Color = Color::from_rgb8(18, 20, 24);
+const SIDEBAR: Color = Color::from_rgba(0.10, 0.11, 0.14, 0.92);
+const PANEL: Color = Color::from_rgba(0.13, 0.15, 0.18, 0.84);
+const PANEL_LIGHT: Color = Color::from_rgba(0.18, 0.20, 0.24, 0.88);
+const TEXT: Color = Color::from_rgb8(238, 241, 244);
+const MUTED: Color = Color::from_rgb8(177, 184, 194);
+const SUBTLE: Color = Color::from_rgb8(137, 146, 158);
+const CYAN: Color = Color::from_rgb8(230, 184, 98);
+const CYAN_DARK: Color = Color::from_rgba(0.30, 0.25, 0.16, 0.94);
+const PURPLE: Color = Color::from_rgb8(193, 157, 112);
+const GREEN: Color = Color::from_rgb8(126, 190, 139);
+const ORANGE: Color = Color::from_rgb8(226, 164, 91);
+const RED: Color = Color::from_rgb8(231, 116, 120);
+const EDGE: Color = Color::from_rgba(0.88, 0.91, 0.96, 0.09);
+const EDGE_BRIGHT: Color = Color::from_rgba(0.94, 0.76, 0.45, 0.34);
+const DIVIDER: Color = Color::from_rgba(0.88, 0.91, 0.96, 0.08);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -150,6 +152,24 @@ pub enum Message {
     ToggleFavorite(String),
     OpenNews(usize),
     RefreshRecentPlays,
+    RefreshLaunchLog,
+    OpenLaunchConsole,
+    CloseLaunchConsole,
+    CopyLaunchLog,
+    CopyLaunchError,
+    PickBackground,
+    BackgroundPicked(Result<Option<String>, String>),
+    ResetBackground,
+    ToggleTelemetry(bool),
+    SetLanguage(String),
+    DiscordClientIdChanged(String),
+    SaveDiscordClientId,
+    ToggleDiscordRpc(bool),
+    DiscordRpcUpdated(Result<String, String>),
+    ToggleUpdateNotes(bool),
+    CheckUpdates,
+    UpdatesLoaded(Result<Vec<UpdateEntry>, String>),
+    OpenGithubReleases,
     WardrobeAnimationTick,
     OpenRepository,
     Info(&'static str),
@@ -207,11 +227,24 @@ pub struct App {
     wardrobe_walk_phase: f32,
     recent_plays: Vec<store::RecentPlay>,
     selected_news: Option<usize>,
+    background: Option<image::Handle>,
+    launch_log: game::LaunchLog,
+    launch_output: Vec<String>,
+    launch_console_open: bool,
+    launch_status: String,
+    launch_error: Option<String>,
+    updates: Vec<UpdateEntry>,
+    updates_busy: bool,
+    updates_error: Option<String>,
+    discord_rpc_status: String,
 }
 
 impl Default for App {
     fn default() -> Self {
         let data = store::load();
+        let background = data.settings.background_image.as_ref()
+            .filter(|path| std::path::Path::new(path).is_file())
+            .map(image::Handle::from_path);
         let wardrobe_account_id = data.settings.selected_account_id.as_ref()
             .and_then(|id| data.accounts.iter().find(|account| &account.id == id))
             .map(|account| account.id.clone())
@@ -283,6 +316,20 @@ impl Default for App {
             wardrobe_walk_phase: 0.0,
             recent_plays: store::load_recent_plays(),
             selected_news: None,
+            background,
+            launch_log: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            launch_output: Vec::new(),
+            launch_console_open: false,
+            launch_status: "Ожидание запуска".to_owned(),
+            launch_error: None,
+            updates: Vec::new(),
+            updates_busy: false,
+            updates_error: None,
+            discord_rpc_status: if data.settings.discord_rpc_enabled {
+                "Включён в настройках".to_owned()
+            } else {
+                "Выключен".to_owned()
+            },
             data,
         }
     }
@@ -1547,19 +1594,19 @@ impl<Message> canvas::Program<Message> for GlowBackdrop {
             &mut frame,
             iced::Point::new(bounds.width * 0.72, bounds.height * 0.12),
             440.0,
-            Color::from_rgb8(224, 224, 220),
+            Color::from_rgb8(45, 49, 57),
         );
         draw_glow(
             &mut frame,
             iced::Point::new(bounds.width * 0.42, bounds.height * 0.95),
             360.0,
-            Color::from_rgb8(229, 225, 217),
+            Color::from_rgb8(38, 42, 50),
         );
         draw_glow(
             &mut frame,
             iced::Point::new(bounds.width * 0.98, bounds.height * 0.72),
             280.0,
-            Color::from_rgb8(233, 231, 224),
+            Color::from_rgb8(48, 43, 37),
         );
         vec![frame.into_geometry()]
     }
@@ -3261,7 +3308,7 @@ fn wardrobe_page(app: &App) -> Element<'_, Message> {
                 .padding(10)
                 .width(Length::Fill)
                 .style(move |_| glass_style(
-                    if selected { Color::from_rgba(0.91, 0.92, 0.90, 0.96) } else { PANEL },
+                    if selected { Color::from_rgba(0.30, 0.25, 0.16, 0.72) } else { PANEL },
                     if selected { EDGE_BRIGHT } else { EDGE },
                 )),
             );
@@ -4369,16 +4416,16 @@ fn primary_button(label: &'static str, message: Message) -> Element<'static, Mes
             let mut style = button::secondary(theme, status);
             style.background = Some(
                 if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                    Color::from_rgba(0.93, 0.94, 0.92, 0.97)
+                    Color::from_rgba(0.95, 0.82, 0.58, 0.26)
                 } else {
-                    Color::from_rgba(1.0, 1.0, 1.0, 0.78)
+                    Color::from_rgba(0.95, 0.97, 1.0, 0.12)
                 }
                 .into(),
             );
             style.text_color = TEXT;
             style.border = Border::default().rounded(13).width(1).color(EDGE_BRIGHT);
             style.shadow = Shadow {
-                color: Color::from_rgba(0.10, 0.15, 0.19, 0.09),
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.30),
                 offset: Vector::new(0.0, 3.0),
                 blur_radius: 12.0,
             };
@@ -4395,9 +4442,9 @@ fn tonal_button(label: &'static str, message: Message) -> Element<'static, Messa
             let mut style = button::secondary(theme, status);
             style.background = Some(
                 if matches!(status, button::Status::Hovered) {
-                    Color::from_rgba(0.985, 0.985, 0.975, 0.97)
+                    Color::from_rgba(0.94, 0.96, 1.0, 0.10)
                 } else {
-                    Color::from_rgba(0.95, 0.95, 0.935, 0.78)
+                    Color::from_rgba(0.94, 0.96, 1.0, 0.06)
                 }
                 .into(),
             );
@@ -4414,7 +4461,7 @@ fn quiet_button(label: &'static str, message: Message) -> Element<'static, Messa
         .padding([10, 14])
         .style(|theme, status| {
             let mut style = button::secondary(theme, status);
-            style.background = Some(PANEL_LIGHT.into());
+            style.background = Some(Color::from_rgba(0.94, 0.96, 1.0, 0.08).into());
             style.text_color = TEXT;
             style.border = Border::default().rounded(11).width(1).color(EDGE);
             style
