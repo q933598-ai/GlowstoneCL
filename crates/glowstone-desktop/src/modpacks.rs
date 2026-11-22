@@ -258,7 +258,7 @@ fn write_overrides(archive: &mut zip::ZipArchive<Cursor<Vec<u8>>>, destination: 
         return Err("В .mrpack слишком много элементов архива.".to_owned());
     }
     for index in 0..archive.len() {
-        let mut file = archive.by_index(index)
+        let file = archive.by_index(index)
             .map_err(|error| format!("Не удалось прочитать содержимое .mrpack: {error}"))?;
         let name = file.name().to_owned();
         let prefix = if name.starts_with("overrides/") {
