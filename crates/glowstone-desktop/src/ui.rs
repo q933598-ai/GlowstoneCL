@@ -3777,9 +3777,21 @@ fn instance_settings_page(app: &App) -> Element<'_, Message> {
     if app.instance_screenshots.is_empty() {
         screenshots = screenshots.push(text("Скриншоты пока не найдены.").size(9).color(MUTED));
     } else {
+        let screenshot_dir = store::instance_directory(&id)
+            .map(|directory| directory.join("screenshots"));
         for item in &app.instance_screenshots {
+            let thumbnail: Element<'_, Message> = if let Some(directory) = &screenshot_dir {
+                image::Image::new(image::Handle::from_path(directory.join(&item.name)))
+                    .width(Length::Fixed(108.0))
+                    .height(Length::Fixed(64.0))
+                    .content_fit(ContentFit::Cover)
+                    .into()
+            } else {
+                icon("image", SUBTLE, 20.0)
+            };
             screenshots = screenshots.push(
                 row![
+                    thumbnail,
                     column![
                         text(item.name.clone()).size(9).color(TEXT),
                         text(format_file_size(item.size)).size(8).color(MUTED),
