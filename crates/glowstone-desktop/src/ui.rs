@@ -1465,9 +1465,10 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             let client_id = app.client_id.clone();
             let launch_log = app.launch_log.clone();
             let game_name = instance.name.clone();
+            let launch_message_id = id.clone();
             let launch_task = iced::Task::perform(
                 game::launch_instance(instance, account, client_id, launch_log),
-                move |result| Message::LaunchFinished(id.clone(), result),
+                move |result| Message::LaunchFinished(launch_message_id, result),
             );
             let mut tasks = vec![launch_task];
             if app.data.settings.discord_rpc_enabled {
