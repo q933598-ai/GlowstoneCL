@@ -967,14 +967,30 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             };
 
             app.launch_busy = Some(id.clone());
+            app.launch_console_open = true;
+            app.launch_error = None;
+            app.launch_output.clear();
+            app.launch_status = format!(
+                "Запускается {} · Minecraft {}",
+                instance.platform.label(),
+                instance.game_version
+            );
+            if let Ok(mut lines) = app.launch_log.lock() {
+                lines.clear();
+            }
+            game::push_launch_log(
+                &app.launch_log,
+                format!("=== Запуск {} · {} ===", instance.name, instance.game_version),
+            );
             app.notice = Some(format!(
-                "Подготовка {} {}. При первом запуске файлы игры и Java будут загружены автоматически…",
+                "Подготовка {} {}. Подробности отображаются в окне запуска…",
                 instance.platform.label(),
                 instance.game_version
             ));
             let client_id = app.client_id.clone();
+            let launch_log = app.launch_log.clone();
             return iced::Task::perform(
-                game::launch_instance(instance, account, client_id),
+                game::launch_instance(instance, account, client_id, launch_log),
                 move |result| Message::LaunchFinished(id.clone(), result),
             );
         }
@@ -990,9 +1006,24 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     }
                     let save_error = store::save(&app.data).err();
                     let mut exit_text = match outcome.exit_code {
-                        Some(0) => "Игра завершилась штатно.".to_owned(),
-                        Some(code) => format!("Игра завершилась с кодом {code}. Файлы сборки установлены."),
-                        None => "Игровой процесс завершился. Файлы сборки установлены.".to_owned(),
+                        Some(0) => {
+                            app.launch_status = "Игра закрылась без ошибок".to_owned();
+                            "Игра завершилась штатно.".to_owned()
+                        }
+                        Some(code) => {
+                            let message = format!("Игровой процесс завершился с кодом {code}.");
+                            app.launch_status = message.clone();
+                            app.launch_error = Some(message.clone());
+                            game::push_launch_log(&app.launch_log, format!("ОШИБКА: {message}"));
+                            if app.data.settings.telemetry_enabled {
+                                let _ = store::append_local_diagnostic(&message);
+                            }
+                            format!("{message} Файлы сборки установлены.")
+                        }
+                        None => {
+                            app.launch_status = "Игровой процесс завершился".to_owned();
+                            "Игровой процесс завершился. Файлы сборки установлены.".to_owned()
+                        }
                     };
                     if let Some(notice) = outcome.notice {
                         exit_text.push(' ');
@@ -1002,8 +1033,20 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                         Some(error) => format!("{exit_text} Не удалось сохранить состояние сборки: {error}"),
                         None => exit_text,
                     });
+                    game::push_launch_log(&app.launch_log, app.launch_status.clone());
                 }
-                Err(error) => app.notice = Some(error),
+                Err(error) => {
+                    app.launch_status = "Ошибка запуска".to_owned();
+                    app.launch_error = Some(error.clone());
+                    game::push_launch_log(&app.launch_log, format!("ОШИБКА: {error}"));
+                    if app.data.settings.telemetry_enabled {
+                        let _ = store::append_local_diagnostic(&error);
+                    }
+                    app.notice = Some(error);
+                }
+            }
+            if let Ok(lines) = app.launch_log.lock() {
+                app.launch_output = lines.clone();
             }
         }
         Message::DeleteInstance(id) => {
