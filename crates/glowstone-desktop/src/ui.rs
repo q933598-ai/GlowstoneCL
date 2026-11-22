@@ -493,17 +493,40 @@ fn start_curseforge_search(app: &mut App) -> iced::Task<Message> {
     )
 }
 
-fn discord_rpc_task(enabled: bool, client_id: String) -> iced::Task<Message> {
+fn discord_presence_task(
+    enabled: bool,
+    client_id: String,
+    details: String,
+    state: String,
+) -> iced::Task<Message> {
     iced::Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
-                crate::discord::set_enabled(enabled, &client_id)
+                crate::discord::set_presence(enabled, &client_id, &details, &state)
             })
             .await
             .map_err(|error| format!("Задача Discord RPC завершилась с ошибкой: {error}"))?
         },
         Message::DiscordRpcUpdated,
     )
+}
+
+fn discord_rpc_task(enabled: bool, client_id: String) -> iced::Task<Message> {
+    discord_presence_task(
+        enabled,
+        client_id,
+        "GlowstoneCL".to_owned(),
+        "Выбирает сборку Minecraft".to_owned(),
+    )
+}
+
+/// Reconnects Discord Rich Presence after application startup when the user left it enabled.
+pub fn initial_task(app: &App) -> iced::Task<Message> {
+    if app.data.settings.discord_rpc_enabled {
+        discord_rpc_task(true, app.data.settings.discord_client_id.clone())
+    } else {
+        iced::Task::none()
+    }
 }
 
 pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
@@ -1218,6 +1241,18 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     .err()
                     .map(|error| format!("Не удалось сохранить выбранную сборку: {error}"))
                     .or_else(|| Some("Сборка выбрана.".into()));
+                if app.data.settings.discord_rpc_enabled {
+                    let selected_name = app.data.instances.iter()
+                        .find(|item| item.id.0 == id)
+                        .map(|item| item.name.clone())
+                        .unwrap_or_else(|| "Сборка Minecraft".to_owned());
+                    return discord_presence_task(
+                        true,
+                        app.data.settings.discord_client_id.clone(),
+                        "GlowstoneCL".to_owned(),
+                        format!("Выбрана сборка: {selected_name}"),
+                    );
+                }
             }
         }
         Message::LaunchInstance(id) => {
@@ -1261,10 +1296,21 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             ));
             let client_id = app.client_id.clone();
             let launch_log = app.launch_log.clone();
-            return iced::Task::perform(
+            let game_name = instance.name.clone();
+            let launch_task = iced::Task::perform(
                 game::launch_instance(instance, account, client_id, launch_log),
                 move |result| Message::LaunchFinished(id.clone(), result),
             );
+            let mut tasks = vec![launch_task];
+            if app.data.settings.discord_rpc_enabled {
+                tasks.push(discord_presence_task(
+                    true,
+                    app.data.settings.discord_client_id.clone(),
+                    "Играет в Minecraft".to_owned(),
+                    game_name,
+                ));
+            }
+            return iced::Task::batch(tasks);
         }
         Message::LaunchFinished(id, result) => {
             if app.launch_busy.as_deref() == Some(id.as_str()) {
@@ -1319,6 +1365,14 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             }
             if let Ok(lines) = app.launch_log.lock() {
                 app.launch_output = lines.clone();
+            }
+            if app.data.settings.discord_rpc_enabled {
+                return discord_presence_task(
+                    true,
+                    app.data.settings.discord_client_id.clone(),
+                    "GlowstoneCL".to_owned(),
+                    "Выбирает сборку Minecraft".to_owned(),
+                );
             }
         }
         Message::DeleteInstance(id) => {
@@ -1929,7 +1983,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             match result {
                 Ok(status) => {
                     app.discord_rpc_status = status.clone();
-                    app.data.settings.discord_rpc_enabled = status.contains("включён");
+                    app.data.settings.discord_rpc_enabled = !status.contains("выключен");
                     if let Err(error) = store::save(&app.data) {
                         app.notice = Some(format!("{status} Не удалось сохранить настройку: {error}"));
                     } else {
