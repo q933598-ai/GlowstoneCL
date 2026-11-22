@@ -3913,7 +3913,12 @@ fn loader_button(loader: LoaderKind, current: LoaderKind) -> Element<'static, Me
 }
 
 fn choice_button(label: &'static str, active: bool, message: Message) -> Element<'static, Message> {
-    button(text(label).size(10).color(if active { TEXT } else { MUTED }))
+    button(
+        row![
+            icon(if active { "check-circle" } else { "circle" }, if active { CYAN } else { SUBTLE }, 13.0),
+            text(label).size(10).color(if active { TEXT } else { MUTED }),
+        ].spacing(6).align_y(Alignment::Center)
+    )
         .on_press(message)
         .padding([9, 12])
         .style(move |theme, status| {
@@ -6077,8 +6082,60 @@ fn status_chip(
         .into()
 }
 
+fn button_icon(label: &str) -> Option<&'static str> {
+    if label.contains("Создать") || label.contains("Добавить") || label.contains("Показать ещё") {
+        Some("plus")
+    } else if label.contains("Установить") || label.contains("Обновить") || label.contains("Проверить") {
+        Some("refresh-cw")
+    } else if label.contains("Удалить") {
+        Some("trash")
+    } else if label.contains("Сохранить") {
+        Some("save")
+    } else if label.contains("Отмена") || label.contains("Закрыть") {
+        Some("x")
+    } else if label.contains("Обзор") || label.contains("папку") || label.contains("Папку") {
+        Some("folder")
+    } else if label.contains("GitHub") {
+        Some("github")
+    } else if label.contains("Релизы") {
+        Some("download")
+    } else if label.contains("Импорт") {
+        Some("package")
+    } else if label.contains("Настройки") {
+        Some("settings")
+    } else if label.contains("Моды") {
+        Some("puzzle")
+    } else if label.contains("Выбрать") || label.contains("Готово") {
+        Some("check")
+    } else if label.contains("Играть") || label.contains("Запустить") {
+        Some("play")
+    } else if label.contains("изображение") {
+        Some("image")
+    } else {
+        None
+    }
+}
+
+fn action_button_content(
+    label: &'static str,
+    accent: Color,
+    size: u16,
+) -> Element<'static, Message> {
+    if let Some(icon_name) = button_icon(label) {
+        row![
+            icon(icon_name, accent, 13.0),
+            text(label).size(size).color(TEXT),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center)
+        .into()
+    } else {
+        text(label).size(size).color(TEXT).into()
+    }
+}
+
 fn primary_button(label: &'static str, message: Message) -> Element<'static, Message> {
-    let control: Element<'static, Message> = button(text(label).size(10).color(TEXT))
+    let control: Element<'static, Message> = button(action_button_content(label, CYAN, 10))
         .on_press(message)
         .padding([10, 15])
         .style(|theme, status| {
@@ -6105,7 +6162,7 @@ fn primary_button(label: &'static str, message: Message) -> Element<'static, Mes
 }
 
 fn tonal_button(label: &'static str, message: Message) -> Element<'static, Message> {
-    let control: Element<'static, Message> = button(text(label).size(9).color(TEXT))
+    let control: Element<'static, Message> = button(action_button_content(label, MUTED, 9))
         .on_press(message)
         .padding([10, 14])
         .style(|theme, status| {
@@ -6127,7 +6184,7 @@ fn tonal_button(label: &'static str, message: Message) -> Element<'static, Messa
 }
 
 fn quiet_button(label: &'static str, message: Message) -> Element<'static, Message> {
-    let control: Element<'static, Message> = button(text(label).size(9).color(TEXT))
+    let control: Element<'static, Message> = button(action_button_content(label, MUTED, 9))
         .on_press(message)
         .padding([10, 14])
         .style(|theme, status| {
@@ -6276,6 +6333,11 @@ fn icon(
                 "shirt" => "m16 4 5 3-2 5-3-1v9H8v-9l-3 1-2-5 5-3c1 2 2 3 4 3s3-1 4-3Z",
                 "image" => "M4 4h16v16H4z M4 16l5-5 4 4 3-3 4 4 M9 9h.01",
                 "check-circle" => "M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0Z M8 12l3 3 5-6",
+                "circle" => "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z",
+                "x" => "M18 6 6 18 M6 6l12 12",
+                "save" => "M5 3h12l4 4v14H3V3h2 M7 3v6h10V3 M7 21v-7h10v7",
+                "folder" => "M3 6h7l2 2h9v11H3z M3 10h18",
+                "external-link" => "M14 4h6v6 M20 4l-9 9 M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",
                 "settings" => "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 3.1-.2-.1a1.7 1.7 0 0 0-1.9.2l-.1.1h-3.6l-.1-.2a1.7 1.7 0 0 0-1.6-1 1.7 1.7 0 0 0-1.1.4l-.2.1-3.1-1.8.1-.2a1.7 1.7 0 0 0-.2-1.9l-.1-.1v-3.6l.2-.1a1.7 1.7 0 0 0 .6-2.7l-.1-.2 1.8-3.1.2.1a1.7 1.7 0 0 0 1.9-.2l.1-.1h3.6l.1.2a1.7 1.7 0 0 0 2.7.6l.2-.1 3.1 1.8-.1.2a1.7 1.7 0 0 0 .2 1.9l.1.1V15Z",
                 "search" => "M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15Z M16 16l5 5",
                 "community" => "M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2 M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M20 8v6 M17 11h6",
