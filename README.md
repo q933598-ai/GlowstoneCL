@@ -35,7 +35,7 @@ The `test/glowstonecl` branch includes:
 - per-instance content management: browse and delete saved worlds, open the saves/screenshots/mods directories, preview and remove screenshots, and manage the Java multiplayer server list through the standard compressed NBT `servers.dat` format. The Create World action launches that profile; the actual world is created in Minecraft's Singleplayer menu;
 - an installed Java mod inventory that scans every JAR in the selected instance's `mods/` folder, including manually copied and modpack files, with safe removal and manifest cleanup for Modrinth/CurseForge-managed entries;
 - subtle animated ambient background lighting, a fade between pages, and animated overlays that also work with user-selected wallpapers;
-- Discord Rich Presence uses one shared public Application ID embedded at build time, reconnects when the desktop Discord client restarts, and switches between launcher and in-game profile status;
+- Discord Rich Presence uses one shared Application ID compiled into the launcher, reconnects when the desktop Discord client restarts, and switches between launcher and in-game profile status;
 - a centered live launch diagnostics window for Java and Horizon: CrustCore preparation events, Minecraft `logs/latest.log` tail, Horizon stdout/stderr, final exit status, and copyable error/full-log actions;
 - user-selectable wallpaper images, plus bundled preset discovery from `crates/glowstone-desktop/assets/backgrounds/` (the folder currently contains instructions and awaits artwork);
 - opt-in **local-only diagnostics**: selected launch errors can be stored in `diagnostics/errors.log` after basic token/path redaction; this build does not upload telemetry to a remote server;
