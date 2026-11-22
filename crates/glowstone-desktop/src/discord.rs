@@ -12,7 +12,7 @@ static CLIENT: OnceLock<Mutex<RpcState>> = OnceLock::new();
 
 /// Shared Discord Application ID used by GlowstoneCL Rich Presence.
 pub fn application_id() -> &'static str {
-    "1574029556392923247"
+    "1574042974592172175"
 }
 
 /// Updates Discord Rich Presence, reconnecting automatically if the Application ID changes.
