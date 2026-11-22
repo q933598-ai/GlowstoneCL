@@ -31,9 +31,8 @@ static CHILD_DISPLAY_ENV: std::sync::OnceLock<
     Vec<(std::ffi::OsString, std::ffi::OsString)>,
 > = std::sync::OnceLock::new();
 
-/// Restore display variables removed to force the launcher's own Winit backend.
-/// This is applied to game processes only; the launcher's process environment
-/// remains unchanged after startup so it cannot leak the forced backend into games.
+/// Restore display variables saved before forcing the launcher's Winit backend.
+/// Called for game processes so they receive the user's original session environment.
 #[cfg(target_os = "linux")]
 pub(crate) fn restore_child_display_environment(
     command: &mut tokio::process::Command,
