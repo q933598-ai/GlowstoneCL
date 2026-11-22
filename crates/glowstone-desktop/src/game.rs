@@ -19,7 +19,7 @@ use ring::signature::{ED25519, UnparsedPublicKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Digest as _;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
 use crate::auth;
@@ -103,6 +103,28 @@ struct MojangVersionEntry {
     kind: String,
     #[serde(default, rename = "releaseTime")]
     release_time: String,
+}
+
+/// Shared launch output buffer consumed by the desktop debug window.
+pub type LaunchLog = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+
+pub fn push_launch_log(log: &LaunchLog, line: impl Into<String>) {
+    if let Ok(mut lines) = log.lock() {
+        lines.push(line.into());
+        if lines.len() > 2_000 {
+            lines.drain(..500);
+        }
+    }
+}
+
+async fn capture_process_output<R>(stream: R, label: &'static str, log: LaunchLog)
+where
+    R: AsyncRead + Unpin,
+{
+    let mut lines = BufReader::new(stream).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        push_launch_log(&log, format!("{label} {line}"));
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -253,7 +275,9 @@ pub async fn launch_instance(
     instance: GameInstance,
     account: AccountProfile,
     microsoft_client_id: String,
+    log: LaunchLog,
 ) -> Result<LaunchOutcome, String> {
+    push_launch_log(&log, format!("Подготовка запуска: {} · {} · {}", instance.name, instance.game_version, instance.platform.label()));
     instance.validate()
         .map_err(|error| format!("Параметры сборки некорректны: {error}"))?;
     let data_root = store::app_data_dir()?;
@@ -261,6 +285,7 @@ pub async fn launch_instance(
     fs::create_dir_all(&instance_dir)
         .map_err(|error| format!("Не удалось создать папку сборки: {error}"))?;
 
+    push_launch_log(&log, "Проверка аккаунта и подготовка игровой сессии…");
     let game_account = match account.kind {
         AccountKind::Offline => auth::offline_game_account(&account),
         AccountKind::Microsoft => {
@@ -299,7 +324,7 @@ pub async fn launch_instance(
 
     match instance.platform {
         GamePlatform::Java => {
-            launch_java(instance, data_root, game_account, active_offline_skin).await
+            launch_java(instance, data_root, game_account, active_offline_skin, log).await
         }
         GamePlatform::Horizon => {
             if account.kind != AccountKind::Microsoft
@@ -310,7 +335,7 @@ pub async fn launch_instance(
                         .to_owned(),
                 );
             }
-            launch_horizon(instance, data_root, instance_dir, game_account, HorizonFlavor::Official, None).await
+            launch_horizon(instance, data_root, instance_dir, game_account, HorizonFlavor::Official, None, log).await
         }
         GamePlatform::HorizonOffline => {
             if account.kind != AccountKind::Offline {
@@ -319,7 +344,7 @@ pub async fn launch_instance(
                         .to_owned(),
                 );
             }
-            launch_horizon(instance, data_root, instance_dir, game_account, HorizonFlavor::Offline, active_offline_skin).await
+            launch_horizon(instance, data_root, instance_dir, game_account, HorizonFlavor::Offline, active_offline_skin, log).await
         }
     }
 }
@@ -586,7 +611,9 @@ async fn launch_java(
     data_root: PathBuf,
     account: GameAccount,
     offline_skin: Option<(PathBuf, SkinModel)>,
+    log: LaunchLog,
 ) -> Result<LaunchOutcome, String> {
+    push_launch_log(&log, format!("Подготовка Minecraft Java {} ({:?})…", instance.game_version, instance.loader));
     let version = java_version_selector(&instance.game_version);
     let mut skin_notice = None;
     let mut options = JavaLaunchOptions::new(data_root.clone(), version);
@@ -645,36 +672,39 @@ async fn launch_java(
         }
     }
 
+    let event_log = log.clone();
     let launch = JavaLaunch::new(options, account)
         .map_err(|error| format!("Не удалось подготовить запуск Minecraft Java: {error}"))?
-        .with_events(std::sync::Arc::new(|event| match event {
+        .with_events(std::sync::Arc::new(move |event| match event {
             Event::Patch(line) | Event::Extract(line) => {
+                push_launch_log(&event_log, line.clone());
                 eprintln!("[GlowstoneCL] {line}");
             }
             Event::Error(message) => {
+                push_launch_log(&event_log, format!("ОШИБКА: {message}"));
                 eprintln!("[GlowstoneCL] {message}");
             }
             Event::Progress { downloaded, total, element } => {
                 if total > 0 && downloaded >= total {
+                    push_launch_log(&event_log, format!("{element}: загрузка завершена"));
                     eprintln!("[GlowstoneCL] {element}: завершено");
                 }
             }
             Event::Check { checked, total, element } => {
                 if total > 0 && checked >= total {
+                    push_launch_log(&event_log, format!("{element}: проверено {total} файлов"));
                     eprintln!("[GlowstoneCL] {element}: проверено {total} файлов");
                 }
             }
             Event::Speed(_) | Event::Estimated(_) => {}
         }));
 
-    eprintln!(
-        "[GlowstoneCL] Подготовка Minecraft Java {} ({:?})",
-        instance.game_version, instance.loader
-    );
+    push_launch_log(&log, "Проверка и загрузка файлов Minecraft, библиотек и Java runtime…");
     let prepared = launch
         .prepare()
         .await
         .map_err(|error| format!("Не удалось установить Minecraft Java: {error}"))?;
+    push_launch_log(&log, "Файлы игры подготовлены. Формирую команду запуска…");
     let plan = launch
         .plan(&prepared)
         .map_err(|error| format!("Не удалось сформировать команду запуска: {error}"))?;
@@ -682,12 +712,40 @@ async fn launch_java(
         .spawn(&plan)
         .map_err(|error| format!("Не удалось запустить Java: {error}"))?;
     if let Err(error) = store::record_recent_play(&instance.id.0) {
+        push_launch_log(&log, format!("Предупреждение: не удалось сохранить историю запусков: {error}"));
         eprintln!("[GlowstoneCL] Не удалось сохранить историю запусков: {error}");
     }
-    let status = child
-        .wait()
-        .await
-        .map_err(|error| format!("Ошибка ожидания Minecraft Java: {error}"))?;
+    push_launch_log(&log, "Minecraft Java запущен. Читаю logs/latest.log…");
+    let game_log_path = store::instance_directory(&instance.id.0)?.join("logs").join("latest.log");
+    let mut last_log_len = 0usize;
+    let mut log_poll = tokio::time::interval(std::time::Duration::from_millis(400));
+    let status = loop {
+        tokio::select! {
+            result = child.wait() => {
+                break result.map_err(|error| format!("Ошибка ожидания Minecraft Java: {error}"))?;
+            }
+            _ = log_poll.tick() => {
+                if let Ok(bytes) = tokio::fs::read(&game_log_path).await {
+                    if bytes.len() < last_log_len {
+                        last_log_len = 0;
+                    }
+                    if bytes.len() > last_log_len {
+                        let start = if bytes.len().saturating_sub(last_log_len) > 1_000_000 {
+                            bytes.len() - 1_000_000
+                        } else {
+                            last_log_len
+                        };
+                        let appended = String::from_utf8_lossy(&bytes[start..]);
+                        for line in appended.lines() {
+                            push_launch_log(&log, format!("[Minecraft] {line}"));
+                        }
+                        last_log_len = bytes.len();
+                    }
+                }
+            }
+        }
+    };
+    push_launch_log(&log, format!("Minecraft Java завершился с кодом {:?}.", status.code()));
 
     Ok(LaunchOutcome {
         instance_id: instance.id.0,
@@ -788,7 +846,9 @@ async fn launch_horizon(
     account: GameAccount,
     flavor: HorizonFlavor,
     offline_skin: Option<(PathBuf, SkinModel)>,
+    log: LaunchLog,
 ) -> Result<LaunchOutcome, String> {
+    push_launch_log(&log, "Проверка Horizon runtime и подписи релиза…");
     let platform = instance.platform;
     let client = reqwest::Client::builder()
         .user_agent("GlowstoneCL/0.1.0 (https://github.com/q933598-ai/GlowstoneCL)")
@@ -802,9 +862,11 @@ async fn launch_horizon(
         &instance.game_version,
     )
     .await?;
+    push_launch_log(&log, format!("Runtime Horizon {} готов.", build.version));
     let pins = build.pins()?;
     validate_horizon_build_pin(flavor, &pins.version, pins.java_major)?;
 
+    push_launch_log(&log, "Проверка Launch API клиента и preparer…");
     let client_api = query_launch_api(&build.client(), &build.directory).await?;
     let client_version = client_api["minecraft"]
         .as_str()
@@ -833,6 +895,7 @@ async fn launch_horizon(
 
     let horizon_ready = is_horizon_prepared(&build).await;
     if !horizon_ready {
+        push_launch_log(&log, "Ресурсы Horizon ещё не подготовлены. Запускаю подготовку…");
         match flavor {
             HorizonFlavor::Official => {
                 // Official Horizon uses CrustCore to install Mojang files for the signed-in owner.
@@ -864,7 +927,7 @@ async fn launch_horizon(
                     .and_then(Path::parent)
                     .ok_or_else(|| "Не удалось определить каталог Java Runtime.".to_owned())?
                     .to_path_buf();
-                prepare_horizon(&build, Some(&data_root), None, Some(&server_jar), Some(&java_home)).await?;
+                prepare_horizon(&build, Some(&data_root), None, Some(&server_jar), Some(&java_home), &log).await?;
             }
             HorizonFlavor::Offline => {
                 let source = find_offline_minecraft_source(&pins.version)?;
@@ -895,7 +958,7 @@ async fn launch_horizon(
                     ).await?;
                     (Some(server_jar), Some(source.directory.as_path()), None)
                 };
-                prepare_horizon(&build, minecraft_dir, prism_dir, server_jar.as_deref(), None).await?;
+                prepare_horizon(&build, minecraft_dir, prism_dir, server_jar.as_deref(), None, &log).await?;
             }
         }
         if !is_horizon_prepared(&build).await {
@@ -909,7 +972,8 @@ async fn launch_horizon(
         fs::write(instance_dir.join("horizon-player.txt"), format!("name:{}\n", account.name))
             .map_err(|error| format!("Не удалось сохранить offline-ник Horizon: {error}"))?;
     }
-    launch_horizon_client(&build, &instance.id.0, &instance_dir, &account, offline_skin).await
+    push_launch_log(&log, "Запуск процесса Horizon…");
+    launch_horizon_client(&build, &instance.id.0, &instance_dir, &account, offline_skin, log).await
         .map(|exit_code| LaunchOutcome {
             instance_id: instance.id.0,
             platform,
@@ -1494,7 +1558,9 @@ async fn prepare_horizon(
     prism_dir: Option<&Path>,
     server_jar: Option<&Path>,
     java_home: Option<&Path>,
+    log: &LaunchLog,
 ) -> Result<(), String> {
+    push_launch_log(log, "Horizon preparer: проверка аргументов и подготовка ресурсов…");
     let api = query_launch_api(&build.preparer(), &build.directory).await?;
     let options = advertised_options(&api)?;
     for required in ["--prepare", "--output"] {
@@ -1555,12 +1621,19 @@ async fn prepare_horizon(
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         if let Ok(value) = serde_json::from_str::<Value>(line) {
             if let Some(message) = value["message"].as_str() {
+                push_launch_log(log, format!("[Horizon preparer] {message}"));
                 eprintln!("[Horizon] {message}");
             }
             if let Some(fraction) = value["fraction"].as_f64() {
+                push_launch_log(log, format!("[Horizon preparer] подготовка: {:.0}%", fraction * 100.0));
                 eprintln!("[Horizon] подготовка: {:.0}%", fraction * 100.0);
             }
+        } else {
+            push_launch_log(log, format!("[Horizon preparer] {line}"));
         }
+    }
+    for line in String::from_utf8_lossy(&output.stderr).lines() {
+        push_launch_log(log, format!("[Horizon preparer stderr] {line}"));
     }
     if !output.status.success() {
         return Err(format!(
@@ -1641,6 +1714,7 @@ async fn launch_horizon_client(
     game_dir: &Path,
     account: &GameAccount,
     offline_skin: Option<(PathBuf, SkinModel)>,
+    log: LaunchLog,
 ) -> Result<Option<i32>, String> {
     let api = query_launch_api(&build.client(), &build.directory).await?;
     let options = advertised_options(&api)?;
@@ -1688,8 +1762,8 @@ async fn launch_horizon_client(
         .args(&args)
         .current_dir(game_dir)
         .stdin(if session_json.is_some() { Stdio::piped() } else { Stdio::null() })
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     if build.flavor == HorizonFlavor::Offline {
         if let Some((skin_path, model)) = offline_skin {
@@ -1719,13 +1793,25 @@ async fn launch_horizon_client(
         }
         // Dropping stdin closes the stream. Horizon reads the JSON once and continues.
     }
+    let stdout = child.stdout.take()
+        .ok_or_else(|| "Не удалось прочитать stdout Horizon.".to_owned())?;
+    let stderr = child.stderr.take()
+        .ok_or_else(|| "Не удалось прочитать stderr Horizon.".to_owned())?;
+    let stdout_log = log.clone();
+    let stderr_log = log.clone();
+    let stdout_task = tokio::spawn(capture_process_output(stdout, "[Horizon]", stdout_log));
+    let stderr_task = tokio::spawn(capture_process_output(stderr, "[Horizon stderr]", stderr_log));
     if let Err(error) = store::record_recent_play(instance_id) {
+        push_launch_log(&log, format!("Предупреждение: не удалось сохранить историю запусков: {error}"));
         eprintln!("[GlowstoneCL] Не удалось сохранить историю запусков: {error}");
     }
     let status = child
         .wait()
         .await
         .map_err(|error| format!("Ошибка ожидания Horizon: {error}"))?;
+    let _ = stdout_task.await;
+    let _ = stderr_task.await;
+    push_launch_log(&log, format!("Horizon завершился с кодом {:?}.", status.code()));
     Ok(status.code())
 }
 
