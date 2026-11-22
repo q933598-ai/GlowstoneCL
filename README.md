@@ -68,15 +68,19 @@ Java, official Horizon and Horizon Offline remain separate runtimes: Java JAR mo
 
 ## Run
 
+Force native Wayland for the GlowstoneCL window:
+
     cargo run -p glowstonecl -- --backend wayland
 
-Force X11:
+Force X11 for the GlowstoneCL window:
 
     cargo run -p glowstonecl -- --backend x11
 
 Run with automatic backend selection:
 
     cargo run -p glowstonecl
+
+The backend switch applies to GlowstoneCL only. The original `DISPLAY` / `WAYLAND_DISPLAY` value is restored on Java and Horizon game processes, so the game receives the desktop session environment and can select its own supported backend.
 
 ## Local data
 
