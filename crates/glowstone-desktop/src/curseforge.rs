@@ -382,6 +382,7 @@ mod tests {
         let mut instance = GameInstance {
             id: glowstone_core::InstanceId("123e4567-e89b-12d3-a456-426614174000".to_owned()),
             name: "Test".to_owned(),
+            description: String::new(),
             platform: GamePlatform::Java,
             game_version: "1.20.1".to_owned(),
             loader: LoaderKind::Fabric,
