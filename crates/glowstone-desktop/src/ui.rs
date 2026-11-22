@@ -81,7 +81,13 @@ pub enum Message {
     SelectLoader(LoaderKind),
     SearchChanged(String),
     InstanceNameChanged(String),
+    InstanceDescriptionChanged(String),
     InstanceVersionChanged(String),
+    CreateMemoryMinChanged(String),
+    CreateMemoryMaxChanged(String),
+    CreateJavaPathChanged(String),
+    PickCreateJava,
+    CreateJavaPicked(Option<String>),
     VersionQueryChanged(String),
     VersionSelected(String),
     ReloadVersionCatalog,
@@ -125,6 +131,9 @@ pub enum Message {
     AddServer,
     RemoveServer(String, usize),
     RemoveInstalledModFile(String, String),
+    LocalModFilesLoaded(String, Result<Vec<mods::InstalledModFile>, String>),
+    InstalledModsFilterChanged(String),
+    ShowMoreInstalledMods,
     ModsSearched(String, Result<Vec<mods::ModProject>, String>),
     InstalledModIconsLoaded(String, Result<Vec<mods::InstalledMod>, String>),
     InstallMod(String),
@@ -193,12 +202,19 @@ pub enum Message {
     RetryDiscordRpc,
     DiscordRpcUpdated(Result<String, String>),
     ToggleUpdateNotes(bool),
+    ToggleAnimations(bool),
+    ToggleHoverSounds(bool),
+    ToggleMinimizeToTray(bool),
+    ToggleInstanceMinimizeToTray(bool),
     CheckUpdates,
     UpdatesLoaded(Result<Vec<UpdateEntry>, String>),
     OpenGithubReleases,
     OpenUpdate(String),
     WardrobeAnimationTick,
     UiAnimationTick,
+    HoverButton,
+    PollTray,
+    RestoreFromTray,
     OpenRepository,
     Info(&'static str),
 }
@@ -213,7 +229,11 @@ pub struct App {
     art: image::Handle,
     data: PersistedState,
     instance_name: String,
+    instance_description: String,
     instance_version: String,
+    create_memory_min: String,
+    create_memory_max: String,
+    create_java_path: String,
     version_query: String,
     version_choices: Vec<game::VersionChoice>,
     version_platform: Option<GamePlatform>,
@@ -275,6 +295,10 @@ pub struct App {
     server_name_input: String,
     server_address_input: String,
     local_mod_files: Vec<mods::InstalledModFile>,
+    installed_mod_filter: String,
+    installed_mods_visible: usize,
+    update_available: bool,
+    tray_active: bool,
     animation_phase: f32,
     page_transition_alpha: f32,
 }
@@ -347,7 +371,11 @@ impl Default for App {
             notice: None,
             art: image::Handle::from_bytes(&include_bytes!("../assets/hero.jpg")[..]),
             instance_name: String::new(),
+            instance_description: String::new(),
             instance_version: "stable".to_owned(),
+            create_memory_min: "1G".to_owned(),
+            create_memory_max: "4G".to_owned(),
+            create_java_path: String::new(),
             version_query: String::new(),
             version_choices: Vec::new(),
             version_platform: None,
@@ -414,6 +442,10 @@ impl Default for App {
             server_name_input: String::new(),
             server_address_input: String::new(),
             local_mod_files: Vec::new(),
+            installed_mod_filter: String::new(),
+            installed_mods_visible: 24,
+            update_available: false,
+            tray_active: false,
             animation_phase: 0.0,
             page_transition_alpha: 0.0,
             data,
@@ -530,17 +562,19 @@ fn discord_rpc_task(enabled: bool, client_id: String) -> iced::Task<Message> {
 
 /// Reconnects Discord Rich Presence after application startup when the user left it enabled.
 pub fn initial_task(app: &App) -> iced::Task<Message> {
+    let mut tasks = vec![
+        iced::Task::perform(updates::fetch_recent_changes(), Message::UpdatesLoaded),
+    ];
     if app.data.settings.discord_rpc_enabled {
-        discord_rpc_task(true, app.data.settings.discord_client_id.clone())
-    } else {
-        iced::Task::none()
+        tasks.push(discord_rpc_task(true, app.data.settings.discord_client_id.clone()));
     }
+    iced::Task::batch(tasks)
 }
 
 pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
     match message {
         Message::Navigate(page) => {
-            if app.page != page {
+            if app.data.settings.animations_enabled && app.page != page {
                 app.page_transition_alpha = 0.30;
             }
             app.page = page;
@@ -879,7 +913,9 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             };
             app.server_name_input.clear();
             app.server_address_input.clear();
-            app.page_transition_alpha = 0.30;
+            if app.data.settings.animations_enabled {
+                app.page_transition_alpha = 0.30;
+            }
             app.page = Page::InstanceSettings;
             let _ = store::save(&app.data);
         }
@@ -1887,7 +1923,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         Message::OpenNews(index) => {
             if index < news_entries().len() {
                 app.selected_news = Some(index);
-                if app.page != Page::News {
+                if app.data.settings.animations_enabled && app.page != Page::News {
                     app.page_transition_alpha = 0.30;
                 }
                 app.page = Page::News;
@@ -2072,9 +2108,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 .rem_euclid(std::f32::consts::TAU);
         }
         Message::UiAnimationTick => {
-            app.animation_phase = (app.animation_phase + 0.035)
-                .rem_euclid(std::f32::consts::TAU);
-            app.page_transition_alpha = (app.page_transition_alpha - 0.035).max(0.0);
+            app.page_transition_alpha = (app.page_transition_alpha - 0.06).max(0.0);
         }
         Message::OpenRepository => {
             app.notice = Some(match webbrowser::open("https://github.com/q933598-ai/GlowstoneCL") {
@@ -2090,12 +2124,17 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
 
 pub fn subscription(app: &App) -> iced::Subscription<Message> {
     let mut subscriptions = Vec::new();
-    subscriptions.push(
-        iced::time::every(std::time::Duration::from_millis(50))
-            .map(|_| Message::UiAnimationTick),
-    );
+    if app.data.settings.animations_enabled && app.page_transition_alpha > 0.001 {
+        subscriptions.push(
+            iced::time::every(std::time::Duration::from_millis(16))
+                .map(|_| Message::UiAnimationTick),
+        );
+    }
 
-    if app.page == Page::Wardrobe && app.wardrobe_active_skin_id.is_some() {
+    if app.data.settings.animations_enabled
+        && app.page == Page::Wardrobe
+        && app.wardrobe_active_skin_id.is_some()
+    {
         subscriptions.push(
             iced::time::every(std::time::Duration::from_millis(110))
                 .map(|_| Message::WardrobeAnimationTick),
@@ -2108,6 +2147,13 @@ pub fn subscription(app: &App) -> iced::Subscription<Message> {
         subscriptions.push(
             iced::time::every(std::time::Duration::from_secs(15))
                 .map(|_| Message::RetryDiscordRpc),
+        );
+    }
+
+    if app.tray_active {
+        subscriptions.push(
+            iced::time::every(std::time::Duration::from_millis(350))
+                .map(|_| Message::PollTray),
         );
     }
 
@@ -2127,21 +2173,30 @@ pub fn subscription(app: &App) -> iced::Subscription<Message> {
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
+    let page_body: Element<'_, Message> = if matches!(app.page, Page::Catalog | Page::InstanceSettings) {
+        scrollable(main_content(app))
+            .height(Length::Fill)
+            .width(Length::Fill)
+            .into()
+    } else {
+        row![
+            scrollable(main_content(app))
+                .height(Length::Fill)
+                .width(Length::Fill),
+            scrollable(right_rail(app))
+                .height(Length::Fill)
+                .width(Length::Fixed(258.0)),
+        ]
+        .spacing(14)
+        .height(Length::Fill)
+        .width(Length::Fill)
+        .into()
+    };
     let content = row![
         sidebar(app),
         column![
             top_bar(app),
-            row![
-                scrollable(main_content(app))
-                    .height(Length::Fill)
-                    .width(Length::Fill),
-                scrollable(right_rail(app))
-                    .height(Length::Fill)
-                    .width(Length::Fixed(258.0)),
-            ]
-            .spacing(14)
-            .height(Length::Fill)
-            .width(Length::Fill),
+            page_body,
         ]
         .spacing(14)
         .height(Length::Fill)
