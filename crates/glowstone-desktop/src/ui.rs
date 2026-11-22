@@ -205,8 +205,6 @@ pub enum Message {
     SetBackgroundPreset(String),
     ToggleTelemetry(bool),
     SetLanguage(String),
-    DiscordClientIdChanged(String),
-    SaveDiscordClientId,
     ToggleDiscordRpc(bool),
     RetryDiscordRpc,
     DiscordRpcUpdated(Result<String, String>),
@@ -451,7 +449,9 @@ impl Default for App {
             updates: Vec::new(),
             updates_busy: false,
             updates_error: None,
-            discord_rpc_status: if data.settings.discord_rpc_enabled {
+            discord_rpc_status: if crate::discord::application_id().is_empty() {
+                "Общий Application ID не встроен".to_owned()
+            } else if data.settings.discord_rpc_enabled {
                 "Включён в настройках".to_owned()
             } else {
                 "Выключен".to_owned()
@@ -576,14 +576,14 @@ fn start_curseforge_search(app: &mut App) -> iced::Task<Message> {
 
 fn discord_presence_task(
     enabled: bool,
-    client_id: String,
     details: String,
     state: String,
 ) -> iced::Task<Message> {
+    let application_id = crate::discord::application_id().to_owned();
     iced::Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
-                crate::discord::set_presence(enabled, &client_id, &details, &state)
+                crate::discord::set_presence(enabled, &application_id, &details, &state)
             })
             .await
             .map_err(|error| format!("Задача Discord RPC завершилась с ошибкой: {error}"))?
@@ -592,10 +592,9 @@ fn discord_presence_task(
     )
 }
 
-fn discord_rpc_task(enabled: bool, client_id: String) -> iced::Task<Message> {
+fn discord_rpc_task(enabled: bool) -> iced::Task<Message> {
     discord_presence_task(
         enabled,
-        client_id,
         "GlowstoneCL".to_owned(),
         "Выбирает сборку Minecraft".to_owned(),
     )
@@ -606,8 +605,8 @@ pub fn initial_task(app: &App) -> iced::Task<Message> {
     let mut tasks = vec![
         iced::Task::perform(updates::fetch_recent_changes(), Message::UpdatesLoaded),
     ];
-    if app.data.settings.discord_rpc_enabled {
-        tasks.push(discord_rpc_task(true, app.data.settings.discord_client_id.clone()));
+    if app.data.settings.discord_rpc_enabled && !crate::discord::application_id().is_empty() {
+        tasks.push(discord_rpc_task(true));
     }
     iced::Task::batch(tasks)
 }
@@ -1443,7 +1442,6 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                         .unwrap_or_else(|| "Сборка Minecraft".to_owned());
                     return discord_presence_task(
                         true,
-                        app.data.settings.discord_client_id.clone(),
                         "GlowstoneCL".to_owned(),
                         format!("Выбрана сборка: {selected_name}"),
                     );
@@ -1501,7 +1499,6 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             if app.data.settings.discord_rpc_enabled {
                 tasks.push(discord_presence_task(
                     true,
-                    app.data.settings.discord_client_id.clone(),
                     "Играет в Minecraft".to_owned(),
                     game_name,
                 ));
@@ -1584,7 +1581,6 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             if app.data.settings.discord_rpc_enabled {
                 return discord_presence_task(
                     true,
-                    app.data.settings.discord_client_id.clone(),
                     "GlowstoneCL".to_owned(),
                     "Выбирает сборку Minecraft".to_owned(),
                 );
@@ -2184,20 +2180,11 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                     .or_else(|| Some("Язык интерфейса сохранён. Перевод остальных разделов будет расширяться постепенно.".to_owned()));
             }
         }
-        Message::DiscordClientIdChanged(value) => app.data.settings.discord_client_id = value,
         Message::CheckDiscordDiagnostics => {
             app.discord_diagnostics = crate::discord::diagnostics();
             app.notice = Some(app.discord_diagnostics.clone());
         }
         Message::DiscordDiagnosticsLoaded(details) => app.discord_diagnostics = details,
-        Message::SaveDiscordClientId => {
-            app.notice = store::save(&app.data).err()
-                .map(|error| format!("Не удалось сохранить Discord Application ID: {error}"))
-                .or_else(|| Some("Discord Application ID сохранён.".to_owned()));
-            if app.data.settings.discord_rpc_enabled {
-                return discord_rpc_task(true, app.data.settings.discord_client_id.clone());
-            }
-        }
         Message::RetryDiscordRpc => {
             if app.data.settings.discord_rpc_enabled {
                 let playing_instance = app.launch_busy.as_deref()
@@ -2207,22 +2194,24 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 } else {
                     ("GlowstoneCL".to_owned(), "Выбирает сборку Minecraft".to_owned())
                 };
-                return discord_presence_task(
-                    true,
-                    app.data.settings.discord_client_id.clone(),
-                    details,
-                    state,
-                );
+                return discord_presence_task(true, details, state);
             }
         }
         Message::ToggleDiscordRpc(enabled) => {
+            if enabled && crate::discord::application_id().is_empty() {
+                app.discord_rpc_status = "Нужен общий Application ID".to_owned();
+                app.notice = Some(
+                    "Для Discord RPC нужно один раз настроить общий Application ID GlowstoneCL. Пользователям лаунчера вводить свои ID не потребуется.".to_owned()
+                );
+                return iced::Task::none();
+            }
             app.data.settings.discord_rpc_enabled = enabled;
             if let Err(error) = store::save(&app.data) {
                 app.data.settings.discord_rpc_enabled = !enabled;
                 app.notice = Some(format!("Не удалось сохранить настройку Discord RPC: {error}"));
                 return iced::Task::none();
             }
-            return discord_rpc_task(enabled, app.data.settings.discord_client_id.clone());
+            return discord_rpc_task(enabled);
         }
         Message::DiscordRpcUpdated(result) => {
             match result {
@@ -2380,7 +2369,7 @@ pub fn subscription(app: &App) -> iced::Subscription<Message> {
 
     // Poll even after a successful handshake: Discord may be closed or restarted
     // while GlowstoneCL is running. set_presence() detects a stale pipe and reconnects.
-    if app.data.settings.discord_rpc_enabled {
+    if app.data.settings.discord_rpc_enabled && !crate::discord::application_id().is_empty() {
         subscriptions.push(
             iced::time::every(std::time::Duration::from_secs(15))
                 .map(|_| Message::RetryDiscordRpc),
@@ -5141,14 +5130,9 @@ fn settings_page(app: &App) -> Element<'_, Message> {
         ),
         preference_panel(
             "DISCORD RICH PRESENCE",
-            "Нужен Application ID из Discord Developer Portal, запущенный desktop Discord и включённое отображение активности в настройках Discord. Веб-версия Discord не поддерживает Rich Presence.",
+            "GlowstoneCL будет использовать один общий Application ID, встроенный в сборку лаунчера. Каждый пользователь просто включает RPC — создавать собственное Discord-приложение и вводить ID не нужно. Нужен запущенный desktop Discord.",
             column![
-                text_input("Discord Application ID", &app.data.settings.discord_client_id)
-                    .on_input(Message::DiscordClientIdChanged)
-                    .padding(9)
-                    .size(10),
                 row![
-                    quiet_button("Сохранить ID", Message::SaveDiscordClientId),
                     choice_button("Включить", app.data.settings.discord_rpc_enabled, Message::ToggleDiscordRpc(true)),
                     choice_button("Выключить", !app.data.settings.discord_rpc_enabled, Message::ToggleDiscordRpc(false)),
                     Space::new().width(Length::Fill),
