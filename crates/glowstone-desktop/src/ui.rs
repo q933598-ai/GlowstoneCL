@@ -2161,13 +2161,6 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             app.discord_diagnostics = crate::discord::diagnostics();
             app.notice = Some(app.discord_diagnostics.clone());
         }
-        Message::DiscordDiagnosticsLoaded(details) => {
-            app.discord_diagnostics = details;
-        }
-        Message::CheckDiscordDiagnostics => {
-            app.discord_diagnostics = crate::discord::diagnostics();
-            app.notice = Some(app.discord_diagnostics.clone());
-        }
         Message::DiscordDiagnosticsLoaded(details) => app.discord_diagnostics = details,
         Message::SaveDiscordClientId => {
             app.notice = store::save(&app.data).err()
