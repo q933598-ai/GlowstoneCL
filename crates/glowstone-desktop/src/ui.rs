@@ -2175,7 +2175,19 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         }
         Message::RetryDiscordRpc => {
             if app.data.settings.discord_rpc_enabled {
-                return discord_rpc_task(true, app.data.settings.discord_client_id.clone());
+                let playing_instance = app.launch_busy.as_deref()
+                    .and_then(|id| app.data.instances.iter().find(|item| item.id.0 == id));
+                let (details, state) = if let Some(instance) = playing_instance {
+                    ("Играет в Minecraft".to_owned(), instance.name.clone())
+                } else {
+                    ("GlowstoneCL".to_owned(), "Выбирает сборку Minecraft".to_owned())
+                };
+                return discord_presence_task(
+                    true,
+                    app.data.settings.discord_client_id.clone(),
+                    details,
+                    state,
+                );
             }
         }
         Message::ToggleDiscordRpc(enabled) => {
