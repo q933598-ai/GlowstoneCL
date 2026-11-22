@@ -4002,6 +4002,11 @@ fn instance_settings_page(app: &App) -> Element<'_, Message> {
         ].spacing(8),
         text("ПУТЬ К ФАЙЛУ JAVA. Например: /usr/lib/jvm/java-25-openjdk/bin/java")
             .size(8).color(SUBTLE),
+        choice_button(
+            "Сворачивать лаунчер в трей при запуске этой сборки",
+            app.instance_settings.minimize_to_tray_on_launch,
+            Message::ToggleInstanceMinimizeToTray(!app.instance_settings.minimize_to_tray_on_launch),
+        ),
         text("JVM ARGUMENTS").size(9).color(CYAN),
         text_input("-XX:+UseZGC; -XX:+AlwaysPreTouch", &app.instance_settings.jvm_args)
             .on_input(Message::InstanceJvmArgsChanged).padding(9).size(9),
@@ -4130,7 +4135,7 @@ fn instance_settings_page(app: &App) -> Element<'_, Message> {
             for item in &app.local_mod_files {
                 mods_list = mods_list.push(
                     row![
-                        icon("puzzle", PURPLE, 15.0),
+                        mod_icon(item.icon_data.clone(), item.title.clone()),
                         column![
                             text(item.title.clone()).size(10).color(TEXT),
                             text(format!("{} · {} · {}", item.version, item.file_name, format_file_size(item.size)))
@@ -5147,22 +5152,36 @@ fn curseforge_catalog_page(app: &App) -> Element<'_, Message> {
         item.name, item.game_version, loader_label(item.loader)
     )).unwrap_or_else(|| "Сборка не выбрана".to_owned());
 
-    let mut installed = column![].spacing(7);
-    if app.local_mod_files.is_empty() {
-        installed = installed.push(text("В папке mods пока нет JAR-файлов.").size(9).color(SUBTLE));
+    let query = app.installed_mod_filter.trim().to_lowercase();
+    let filtered_files: Vec<_> = app.local_mod_files.iter()
+        .filter(|item| query.is_empty()
+            || item.title.to_lowercase().contains(&query)
+            || item.file_name.to_lowercase().contains(&query)
+            || item.version.to_lowercase().contains(&query))
+        .collect();
+    let visible_files: Vec<_> = filtered_files.iter()
+        .take(app.installed_mods_visible)
+        .copied()
+        .collect();
+    let mut installed = column![
+        text_input("Фильтр установленных модов…", &app.installed_mod_filter)
+            .on_input(Message::InstalledModsFilterChanged)
+            .padding(9).size(9),
+    ].spacing(7);
+    if filtered_files.is_empty() {
+        installed = installed.push(text("В папке mods пока нет подходящих JAR-файлов.").size(9).color(SUBTLE));
     } else {
-        for item in &app.local_mod_files {
+        for item in visible_files {
             installed = installed.push(
                 container(
                     row![
-                        icon("puzzle", PURPLE, 16.0),
+                        mod_icon(item.icon_data.clone(), item.title.clone()),
                         column![
                             text(item.title.clone()).size(10).color(TEXT),
                             text(format!("{} · {} · {}", item.version, item.file_name, format_file_size(item.size))).size(8).color(MUTED),
                             text(if item.managed { "УПРАВЛЯЕТСЯ GLOWSTONECL" } else { "РУЧНОЙ / MODPACK" })
                                 .size(7).color(if item.managed { GREEN } else { SUBTLE }),
-                        ].spacing(3),
-                        Space::new().width(Length::Fill),
+                        ].spacing(3).width(Length::Fill),
                         quiet_button("Удалить", Message::RemoveInstalledModFile(
                             app.mod_target_instance.clone().unwrap_or_default(),
                             item.file_name.clone(),
@@ -5174,10 +5193,13 @@ fn curseforge_catalog_page(app: &App) -> Element<'_, Message> {
                 .style(|_| glass_style(PANEL_LIGHT, EDGE))
             );
         }
+        if filtered_files.len() > app.installed_mods_visible {
+            installed = installed.push(quiet_button("Показать ещё", Message::ShowMoreInstalledMods));
+        }
     }
 
     let mut results = column![].spacing(9);
-    for project in &app.curseforge_mod_results {
+    for project in app.curseforge_mod_results.iter().take(18) {
         let installed_now = app.curseforge_installed_mods.iter()
             .any(|item| item.mod_id == project.mod_id && Some(item.file_id) == project.file_id);
         let action: Element<'_, Message> = if installed_now {
@@ -5337,7 +5359,7 @@ fn horizon_catalog_page(app: &App) -> Element<'_, Message> {
     }
 
     let mut results_list = column![].spacing(9);
-    for project in &app.horizon_mod_results {
+    for project in app.horizon_mod_results.iter().take(18) {
         let installed = app.horizon_installed_mods.iter().any(|item| item.id == project.id);
         let compatible = project.versions.iter().any(|version| {
             version.game == "26.3"
@@ -5501,19 +5523,35 @@ fn java_catalog_page(app: &App) -> Element<'_, Message> {
         item.name, item.game_version, loader_label(item.loader)
     )).unwrap_or_else(|| "Сборка не выбрана".to_owned());
 
-    let mut installed_list = column![].spacing(7);
-    if app.local_mod_files.is_empty() {
+    let query = app.installed_mod_filter.trim().to_lowercase();
+    let filtered_files: Vec<_> = app.local_mod_files.iter()
+        .filter(|item| query.is_empty()
+            || item.title.to_lowercase().contains(&query)
+            || item.file_name.to_lowercase().contains(&query)
+            || item.version.to_lowercase().contains(&query))
+        .collect();
+    let visible_files: Vec<_> = filtered_files.iter()
+        .take(app.installed_mods_visible)
+        .copied()
+        .collect();
+    let mut installed_list = column![
+        text_input("Фильтр установленных модов…", &app.installed_mod_filter)
+            .on_input(Message::InstalledModsFilterChanged)
+            .padding(9).size(9),
+    ].spacing(7);
+    if filtered_files.is_empty() {
         installed_list = installed_list.push(
-            text("В этой сборке пока нет JAR-модов.").size(9).color(SUBTLE)
+            text(if app.local_mod_files.is_empty() { "В этой сборке пока нет JAR-модов." } else { "По этому фильтру моды не найдены." })
+                .size(9).color(SUBTLE)
         );
     } else {
-        for item in &app.local_mod_files {
+        for item in visible_files {
             let file_name = item.file_name.clone();
             let target_id = app.mod_target_instance.clone().unwrap_or_default();
             installed_list = installed_list.push(
                 container(
                     row![
-                        icon("puzzle", PURPLE, 17.0),
+                        mod_icon(item.icon_data.clone(), item.title.clone()),
                         column![
                             text(item.title.clone()).size(10).color(TEXT),
                             text(format!("{} · {} · {}", item.version, item.file_name, format_file_size(item.size)))
@@ -5529,10 +5567,15 @@ fn java_catalog_page(app: &App) -> Element<'_, Message> {
                 .style(|_| glass_style(PANEL_LIGHT, EDGE))
             );
         }
+        if filtered_files.len() > app.installed_mods_visible {
+            installed_list = installed_list.push(
+                quiet_button("Показать ещё", Message::ShowMoreInstalledMods)
+            );
+        }
     }
 
     let mut results_list = column![].spacing(9);
-    for project in &app.mod_results {
+    for project in app.mod_results.iter().take(18) {
         let installed = app.installed_mods.iter().any(|item| item.project_id == project.project_id);
         let project_id = project.project_id.clone();
         let project_name = project.title.clone();
