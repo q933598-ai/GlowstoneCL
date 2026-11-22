@@ -39,7 +39,7 @@ pub fn list_servers(instance_id: &str) -> Result<Vec<ServerEntry>, String> {
     }
 
     let bytes = if compressed.starts_with(&[0x1f, 0x8b]) {
-        let mut decoder = GzDecoder::new(compressed.as_slice());
+        let decoder = GzDecoder::new(compressed.as_slice());
         let mut output = Vec::new();
         decoder.take((MAX_SERVER_LIST_BYTES + 1) as u64)
             .read_to_end(&mut output)
