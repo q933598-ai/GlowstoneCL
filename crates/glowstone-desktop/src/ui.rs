@@ -107,6 +107,8 @@ pub enum Message {
     InstanceMemoryMinChanged(String),
     InstanceMemoryMaxChanged(String),
     InstanceJavaPathChanged(String),
+    PickInstanceJava,
+    InstanceJavaPicked(Option<String>),
     InstanceJvmArgsChanged(String),
     InstanceGameArgsChanged(String),
     InstanceResolutionWidthChanged(String),
@@ -273,6 +275,7 @@ pub struct App {
     server_address_input: String,
     local_mod_files: Vec<mods::InstalledModFile>,
     animation_phase: f32,
+    page_transition_alpha: f32,
 }
 
 fn background_presets_dir() -> PathBuf {
@@ -411,6 +414,7 @@ impl Default for App {
             server_address_input: String::new(),
             local_mod_files: Vec::new(),
             animation_phase: 0.0,
+            page_transition_alpha: 0.0,
             data,
         }
     }
@@ -535,6 +539,9 @@ pub fn initial_task(app: &App) -> iced::Task<Message> {
 pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
     match message {
         Message::Navigate(page) => {
+            if app.page != page {
+                app.page_transition_alpha = 0.30;
+            }
             app.page = page;
             if page == Page::Modpacks && app.modpack_results.is_empty() && !app.modpacks_busy {
                 app.modpacks_busy = true;
@@ -871,6 +878,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             };
             app.server_name_input.clear();
             app.server_address_input.clear();
+            app.page_transition_alpha = 0.30;
             app.page = Page::InstanceSettings;
             let _ = store::save(&app.data);
         }
@@ -916,6 +924,23 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         Message::InstanceMemoryMinChanged(value) => app.instance_settings.memory_min = value,
         Message::InstanceMemoryMaxChanged(value) => app.instance_settings.memory_max = value,
         Message::InstanceJavaPathChanged(value) => app.instance_settings.java_path = value,
+        Message::PickInstanceJava => {
+            return iced::Task::perform(
+                async {
+                    rfd::AsyncFileDialog::new()
+                        .set_title("Выбери Java executable")
+                        .pick_file()
+                        .await
+                        .map(|file| file.path().to_string_lossy().into_owned())
+                },
+                Message::InstanceJavaPicked,
+            );
+        }
+        Message::InstanceJavaPicked(path) => {
+            if let Some(path) = path {
+                app.instance_settings.java_path = path;
+            }
+        }
         Message::InstanceJvmArgsChanged(value) => app.instance_settings.jvm_args = value,
         Message::InstanceGameArgsChanged(value) => app.instance_settings.game_args = value,
         Message::InstanceResolutionWidthChanged(value) => app.instance_settings.resolution_width = value,
@@ -1861,6 +1886,9 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         Message::OpenNews(index) => {
             if index < news_entries().len() {
                 app.selected_news = Some(index);
+                if app.page != Page::News {
+                    app.page_transition_alpha = 0.30;
+                }
                 app.page = Page::News;
                 app.notice = None;
                 if !app.updates_busy {
@@ -2039,6 +2067,7 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         Message::UiAnimationTick => {
             app.animation_phase = (app.animation_phase + 0.035)
                 .rem_euclid(std::f32::consts::TAU);
+            app.page_transition_alpha = (app.page_transition_alpha - 0.035).max(0.0);
         }
         Message::OpenRepository => {
             app.notice = Some(match webbrowser::open("https://github.com/q933598-ai/GlowstoneCL") {
@@ -2133,6 +2162,17 @@ pub fn view(app: &App) -> Element<'_, Message> {
     })
     .into();
 
+    let transition_overlay: Element<'_, Message> = container(
+        Space::new().width(Length::Fill).height(Length::Fill),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(|_| container::Style {
+        background: Some(Color::from_rgba(BG.r, BG.g, BG.b, app.page_transition_alpha).into()),
+        ..Default::default()
+    })
+    .into();
+
     let base: Element<'_, Message> = stack![
         backdrop,
         image_tint,
@@ -2140,6 +2180,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .width(Length::Fill)
             .height(Length::Fill)
             .padding(12),
+        transition_overlay,
     ]
     .width(Length::Fill)
     .height(Length::Fill)
@@ -3647,8 +3688,11 @@ fn instance_settings_page(app: &App) -> Element<'_, Message> {
             ].spacing(5).width(Length::Fill),
         ].spacing(10),
         text("JAVA EXECUTABLE").size(9).color(CYAN),
-        text_input("Пусто = Java runtime, выбранный автоматически", &app.instance_settings.java_path)
-            .on_input(Message::InstanceJavaPathChanged).padding(9).size(10),
+        row![
+            text_input("Пусто = Java runtime, выбранный автоматически", &app.instance_settings.java_path)
+                .on_input(Message::InstanceJavaPathChanged).padding(9).size(10).width(Length::Fill),
+            quiet_button("Обзор", Message::PickInstanceJava),
+        ].spacing(8),
         text("ПУТЬ К ФАЙЛУ JAVA. Например: /usr/lib/jvm/java-25-openjdk/bin/java")
             .size(8).color(SUBTLE),
         text("JVM ARGUMENTS").size(9).color(CYAN),
