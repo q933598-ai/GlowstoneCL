@@ -2,6 +2,7 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=GITHUB_SHA");
+    println!("cargo:rerun-if-env-changed=GLOWSTONE_DISCORD_APPLICATION_ID");
     let sha = std::env::var("GITHUB_SHA").ok().filter(|value| !value.trim().is_empty())
         .or_else(|| {
             Command::new("git")
