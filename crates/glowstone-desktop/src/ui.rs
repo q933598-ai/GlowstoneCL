@@ -1549,6 +1549,149 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
                 app.recent_plays = latest;
             }
         }
+        Message::RefreshLaunchLog => {
+            if let Ok(lines) = app.launch_log.lock() {
+                app.launch_output = lines.clone();
+            }
+            let latest = store::load_recent_plays();
+            if latest != app.recent_plays {
+                app.recent_plays = latest;
+            }
+        }
+        Message::OpenLaunchConsole => app.launch_console_open = true,
+        Message::CloseLaunchConsole => {
+            if app.launch_busy.is_none() {
+                app.launch_console_open = false;
+            } else {
+                app.notice = Some("Окно диагностики можно закрыть после завершения запуска.".to_owned());
+            }
+        }
+        Message::CopyLaunchLog => {
+            let contents = app.launch_output.join("\n");
+            return iced::clipboard::write::<Message>(contents);
+        }
+        Message::CopyLaunchError => {
+            let contents = app.launch_error.clone().unwrap_or_else(|| "Ошибки запуска не зафиксированы.".to_owned());
+            return iced::clipboard::write::<Message>(contents);
+        }
+        Message::PickBackground => {
+            return iced::Task::perform(
+                async {
+                    let picked = rfd::AsyncFileDialog::new()
+                        .add_filter("Изображение", &["png", "jpg", "jpeg", "webp"])
+                        .pick_file()
+                        .await;
+                    Ok(picked.map(|file| {
+                        let path: PathBuf = file.path().to_path_buf();
+                        path.to_string_lossy().into_owned()
+                    }))
+                },
+                Message::BackgroundPicked,
+            );
+        }
+        Message::BackgroundPicked(result) => {
+            match result {
+                Ok(Some(path)) if std::path::Path::new(&path).is_file() => {
+                    app.data.settings.background_image = Some(path.clone());
+                    app.background = Some(image::Handle::from_path(path));
+                    app.notice = store::save(&app.data).err()
+                        .map(|error| format!("Фон выбран, но настройки не удалось сохранить: {error}"))
+                        .or_else(|| Some("Пользовательский фон установлен.".to_owned()));
+                }
+                Ok(Some(_)) => app.notice = Some("Файл фона не найден или недоступен.".to_owned()),
+                Ok(None) => {}
+                Err(error) => app.notice = Some(error),
+            }
+        }
+        Message::ResetBackground => {
+            app.data.settings.background_image = None;
+            app.background = None;
+            app.notice = store::save(&app.data).err()
+                .map(|error| format!("Фон сброшен, но настройки не сохранились: {error}"))
+                .or_else(|| Some("Возвращён стандартный тёмный фон GlowstoneCL.".to_owned()));
+        }
+        Message::ToggleTelemetry(enabled) => {
+            app.data.settings.telemetry_enabled = enabled;
+            app.notice = store::save(&app.data).err()
+                .map(|error| format!("Не удалось сохранить настройку диагностики: {error}"))
+                .or_else(|| Some(if enabled {
+                    "Локальная диагностика включена. Ошибки будут сохраняться только на этом устройстве.".to_owned()
+                } else {
+                    "Локальная диагностика выключена.".to_owned()
+                }));
+        }
+        Message::SetLanguage(language) => {
+            if matches!(language.as_str(), "ru" | "en") {
+                app.data.settings.language = language;
+                app.notice = store::save(&app.data).err()
+                    .map(|error| format!("Не удалось сохранить язык: {error}"))
+                    .or_else(|| Some("Язык интерфейса сохранён. Перевод остальных разделов будет расширяться постепенно.".to_owned()));
+            }
+        }
+        Message::DiscordClientIdChanged(value) => app.data.settings.discord_client_id = value,
+        Message::SaveDiscordClientId => {
+            app.notice = store::save(&app.data).err()
+                .map(|error| format!("Не удалось сохранить Discord Application ID: {error}"))
+                .or_else(|| Some("Discord Application ID сохранён.".to_owned()));
+            if app.data.settings.discord_rpc_enabled {
+                return discord_rpc_task(true, app.data.settings.discord_client_id.clone());
+            }
+        }
+        Message::ToggleDiscordRpc(enabled) => {
+            app.data.settings.discord_rpc_enabled = enabled;
+            if let Err(error) = store::save(&app.data) {
+                app.data.settings.discord_rpc_enabled = !enabled;
+                app.notice = Some(format!("Не удалось сохранить настройку Discord RPC: {error}"));
+                return iced::Task::none();
+            }
+            return discord_rpc_task(enabled, app.data.settings.discord_client_id.clone());
+        }
+        Message::DiscordRpcUpdated(result) => {
+            match result {
+                Ok(status) => {
+                    app.discord_rpc_status = status.clone();
+                    app.data.settings.discord_rpc_enabled = status.contains("включён");
+                    if let Err(error) = store::save(&app.data) {
+                        app.notice = Some(format!("{status} Не удалось сохранить настройку: {error}"));
+                    } else {
+                        app.notice = Some(status);
+                    }
+                }
+                Err(error) => {
+                    app.data.settings.discord_rpc_enabled = false;
+                    app.discord_rpc_status = "Не подключён".to_owned();
+                    let _ = store::save(&app.data);
+                    app.notice = Some(error);
+                }
+            }
+        }
+        Message::ToggleUpdateNotes(enabled) => {
+            app.data.settings.show_update_notes = enabled;
+            app.notice = store::save(&app.data).err()
+                .map(|error| format!("Не удалось сохранить настройку журнала изменений: {error}"))
+                .or_else(|| Some("Настройка отображения журнала изменений сохранена.".to_owned()));
+        }
+        Message::CheckUpdates => {
+            app.updates_busy = true;
+            app.updates_error = None;
+            return iced::Task::perform(updates::fetch_recent_changes(), Message::UpdatesLoaded);
+        }
+        Message::UpdatesLoaded(result) => {
+            app.updates_busy = false;
+            match result {
+                Ok(entries) => {
+                    app.updates = entries;
+                    app.updates_error = None;
+                }
+                Err(error) => app.updates_error = Some(error),
+            }
+        }
+        Message::OpenGithubReleases => {
+            app.notice = Some(match webbrowser::open("https://github.com/q933598-ai/GlowstoneCL/releases") {
+                Ok(()) => "Открываю страницу релизов GlowstoneCL.".to_owned(),
+                Err(error) => format!("Не удалось открыть страницу релизов: {error}"),
+            });
+        }
         Message::WardrobeAnimationTick => {
             app.wardrobe_walk_phase = (app.wardrobe_walk_phase + 0.24)
                 .rem_euclid(std::f32::consts::TAU);
