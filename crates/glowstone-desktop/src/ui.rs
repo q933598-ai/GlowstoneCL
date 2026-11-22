@@ -812,6 +812,99 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             }
             return start_catalog_search(app, instance);
         }
+        Message::OpenInstanceSettings(instance_id) => {
+            let Some(instance) = app.data.instances.iter()
+                .find(|item| item.id.0 == instance_id).cloned()
+            else {
+                app.notice = Some("Сборка не найдена.".to_owned());
+                return iced::Task::none();
+            };
+            app.instance_settings_id = Some(instance_id.clone());
+            app.instance_settings = match store::load_instance_settings(&instance_id) {
+                Ok(settings) => settings,
+                Err(error) => {
+                    app.notice = Some(error);
+                    store::InstanceSettings::default()
+                }
+            };
+            app.instance_settings_loader = instance.loader;
+            app.data.settings.selected_instance_id = Some(instance_id.clone());
+            app.instance_worlds = store::list_instance_folder(&instance_id, "saves").unwrap_or_default();
+            app.instance_screenshots = store::list_instance_folder(&instance_id, "screenshots").unwrap_or_default();
+            app.instance_servers = match crate::instance_tools::list_servers(&instance_id) {
+                Ok(servers) => servers,
+                Err(error) => {
+                    app.notice = Some(error);
+                    Vec::new()
+                }
+            };
+            app.local_mod_files = if instance.platform == GamePlatform::Java {
+                mods::local_files(&instance_id).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            app.server_name_input.clear();
+            app.server_address_input.clear();
+            app.page = Page::InstanceSettings;
+            let _ = store::save(&app.data);
+        }
+        Message::SaveInstanceSettings => {
+            let Some(instance_id) = app.instance_settings_id.clone() else {
+                app.notice = Some("Сначала выбери сборку.".to_owned());
+                return iced::Task::none();
+            };
+            let Some(index) = app.data.instances.iter().position(|item| item.id.0 == instance_id) else {
+                app.notice = Some("Сборка больше не существует.".to_owned());
+                return iced::Task::none();
+            };
+            let mut candidate = app.data.instances[index].clone();
+            if !app.instance_settings_loader.is_valid_for(candidate.platform) {
+                app.notice = Some("Этот загрузчик несовместим с выбранной платформой.".to_owned());
+                return iced::Task::none();
+            }
+            candidate.loader = app.instance_settings_loader;
+            if candidate.loader != app.data.instances[index].loader {
+                candidate.loader_version = None;
+            }
+            if let Err(error) = candidate.validate() {
+                app.notice = Some(format!("Не удалось сохранить загрузчик: {error}"));
+                return iced::Task::none();
+            }
+            if let Err(error) = app.instance_settings.validate() {
+                app.notice = Some(error);
+                return iced::Task::none();
+            }
+            if let Err(error) = store::save_instance_settings(&instance_id, &app.instance_settings) {
+                app.notice = Some(error);
+                return iced::Task::none();
+            }
+            if let Err(error) = store::save_instance_metadata(&candidate) {
+                app.notice = Some(format!("Настройки запуска сохранены, но не удалось применить загрузчик: {error}"));
+                return iced::Task::none();
+            }
+            app.data.instances[index] = candidate;
+            app.notice = store::save(&app.data).err()
+                .map(|error| format!("Настройки сохранены, но state.json не обновился: {error}"))
+                .or_else(|| Some("Настройки сборки сохранены. Изменения применятся при следующем запуске.".to_owned()));
+        }
+        Message::InstanceMemoryMinChanged(value) => app.instance_settings.memory_min = value,
+        Message::InstanceMemoryMaxChanged(value) => app.instance_settings.memory_max = value,
+        Message::InstanceJavaPathChanged(value) => app.instance_settings.java_path = value,
+        Message::InstanceJvmArgsChanged(value) => {
+            app.instance_settings.jvm_args = value.split(';').map(str::trim)
+                .filter(|line| !line.is_empty()).collect::<Vec<_>>().join("\n");
+        }
+        Message::InstanceGameArgsChanged(value) => {
+            app.instance_settings.game_args = value.split(';').map(str::trim)
+                .filter(|line| !line.is_empty()).collect::<Vec<_>>().join("\n");
+        }
+        Message::InstanceResolutionWidthChanged(value) => app.instance_settings.resolution_width = value,
+        Message::InstanceResolutionHeightChanged(value) => app.instance_settings.resolution_height = value,
+        Message::InstanceEnvironmentChanged(value) => {
+            app.instance_settings.environment_variables = value.split(';').map(str::trim)
+                .filter(|line| !line.is_empty()).collect::<Vec<_>>().join("\n");
+        }
+        Message::InstanceLoaderChanged(loader) => app.instance_settings_loader = loader,
         Message::OpenInstanceMods(target_id) => {
             let Some(instance) = app.data.instances.iter()
                 .find(|item| item.id.0 == target_id && supports_mod_catalog(item))
