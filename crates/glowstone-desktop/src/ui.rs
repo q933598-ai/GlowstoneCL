@@ -2106,11 +2106,16 @@ pub fn view(app: &App) -> Element<'_, Message> {
     .height(Length::Fill);
 
     let backdrop: Element<'_, Message> = if let Some(background) = &app.background {
-        image::Image::new(background.clone())
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .content_fit(ContentFit::Cover)
-            .into()
+        stack![
+            image::Image::new(background.clone())
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .content_fit(ContentFit::Cover),
+            canvas(GlowOverlay { phase: app.animation_phase })
+                .width(Length::Fill)
+                .height(Length::Fill),
+        ]
+        .into()
     } else {
         canvas(GlowBackdrop { phase: app.animation_phase })
             .width(Length::Fill)
@@ -2189,6 +2194,41 @@ impl<Message> canvas::Program<Message> for GlowBackdrop {
             iced::Point::new(bounds.width * (0.98 - drift * 0.03), bounds.height * (0.72 + orbit * 0.03)),
             280.0,
             Color::from_rgb8(48, 43, 37),
+        );
+        vec![frame.into_geometry()]
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GlowOverlay {
+    phase: f32,
+}
+
+impl<Message> canvas::Program<Message> for GlowOverlay {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &iced::Renderer,
+        _theme: &iced::Theme,
+        bounds: Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let pulse = self.phase.sin();
+        let orbit = self.phase.cos();
+        draw_glow(
+            &mut frame,
+            iced::Point::new(bounds.width * (0.20 + pulse * 0.025), bounds.height * (0.28 + orbit * 0.035)),
+            310.0,
+            Color::from_rgb8(226, 164, 91),
+        );
+        draw_glow(
+            &mut frame,
+            iced::Point::new(bounds.width * (0.88 - orbit * 0.025), bounds.height * (0.78 - pulse * 0.03)),
+            360.0,
+            Color::from_rgb8(45, 49, 57),
         );
         vec![frame.into_geometry()]
     }
