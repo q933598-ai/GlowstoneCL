@@ -64,6 +64,14 @@ pub enum PlatformChoice {
     HorizonOffline,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VersionFilter {
+    Release,
+    Snapshot,
+    Beta,
+    Alpha,
+}
+
 impl From<PlatformChoice> for GamePlatform {
     fn from(value: PlatformChoice) -> Self {
         match value {
@@ -89,6 +97,7 @@ pub enum Message {
     CreateJavaPicked(Option<String>),
     InstanceVersionChanged(String),
     VersionQueryChanged(String),
+    SetVersionFilter(VersionFilter, bool),
     VersionSelected(String),
     ReloadVersionCatalog,
     VersionCatalogLoaded(GamePlatform, Result<Vec<game::VersionChoice>, String>),
@@ -239,6 +248,10 @@ pub struct App {
     create_memory_max: String,
     create_java_path: String,
     version_query: String,
+    show_release_versions: bool,
+    show_snapshot_versions: bool,
+    show_beta_versions: bool,
+    show_alpha_versions: bool,
     version_choices: Vec<game::VersionChoice>,
     version_platform: Option<GamePlatform>,
     versions_busy: bool,
@@ -383,6 +396,10 @@ impl Default for App {
             create_memory_max: String::new(),
             create_java_path: String::new(),
             version_query: String::new(),
+            show_release_versions: true,
+            show_snapshot_versions: true,
+            show_beta_versions: false,
+            show_alpha_versions: false,
             version_choices: Vec::new(),
             version_platform: None,
             versions_busy: false,
@@ -1307,6 +1324,14 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
         }
         Message::InstanceVersionChanged(value) => app.instance_version = value,
         Message::VersionQueryChanged(value) => app.version_query = value,
+        Message::SetVersionFilter(filter, enabled) => {
+            match filter {
+                VersionFilter::Release => app.show_release_versions = enabled,
+                VersionFilter::Snapshot => app.show_snapshot_versions = enabled,
+                VersionFilter::Beta => app.show_beta_versions = enabled,
+                VersionFilter::Alpha => app.show_alpha_versions = enabled,
+            }
+        }
         Message::VersionSelected(value) => {
             app.instance_version = value;
             app.notice = None;
@@ -3614,16 +3639,60 @@ fn quick_item(
     .into()
 }
 
+fn version_filters_view(app: &App) -> Element<'_, Message> {
+    if app.platform != PlatformChoice::Java {
+        return Space::new().height(0).into();
+    }
+
+    row![
+        choice_button(
+            "Релизы",
+            app.show_release_versions,
+            Message::SetVersionFilter(VersionFilter::Release, !app.show_release_versions),
+        ),
+        choice_button(
+            "Snapshots",
+            app.show_snapshot_versions,
+            Message::SetVersionFilter(VersionFilter::Snapshot, !app.show_snapshot_versions),
+        ),
+        choice_button(
+            "Beta",
+            app.show_beta_versions,
+            Message::SetVersionFilter(VersionFilter::Beta, !app.show_beta_versions),
+        ),
+        choice_button(
+            "Alpha / Classic",
+            app.show_alpha_versions,
+            Message::SetVersionFilter(VersionFilter::Alpha, !app.show_alpha_versions),
+        ),
+    ]
+    .spacing(6)
+    .into()
+}
+
 fn version_choices_view(app: &App) -> Element<'_, Message> {
     let query = app.version_query.trim().to_ascii_lowercase();
     let matches: Vec<_> = app
         .version_choices
         .iter()
         .filter(|choice| {
-            query.is_empty()
-                || choice.id.to_ascii_lowercase().contains(&query)
-                || choice.label.to_ascii_lowercase().contains(&query)
-                || choice.kind.to_ascii_lowercase().contains(&query)
+            let kind_visible = if app.platform != PlatformChoice::Java {
+                true
+            } else {
+                match choice.kind.as_str() {
+                    "Релиз" | "Последний релиз" => app.show_release_versions,
+                    "Snapshot" | "Последний snapshot" => app.show_snapshot_versions,
+                    "Старая Beta" => app.show_beta_versions,
+                    "Старая Alpha / Classic" => app.show_alpha_versions,
+                    _ => true,
+                }
+            };
+            kind_visible && (
+                query.is_empty()
+                    || choice.id.to_ascii_lowercase().contains(&query)
+                    || choice.label.to_ascii_lowercase().contains(&query)
+                    || choice.kind.to_ascii_lowercase().contains(&query)
+            )
         })
         .collect();
 
@@ -3777,6 +3846,7 @@ fn instance_creator_modal(app: &App) -> Element<'_, Message> {
                 quiet_button("Обновить", Message::ReloadVersionCatalog),
             ]
             .spacing(8),
+            version_filters_view(app),
             version_choices_view(app),
             text("Платформа").size(9).color(MUTED),
             text("Загрузчик").size(9).color(MUTED),
