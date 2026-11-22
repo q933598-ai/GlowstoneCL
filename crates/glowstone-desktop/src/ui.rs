@@ -6119,7 +6119,7 @@ fn button_icon(label: &str) -> Option<&'static str> {
 fn action_button_content(
     label: &'static str,
     accent: Color,
-    size: u16,
+    size: f32,
 ) -> Element<'static, Message> {
     if let Some(icon_name) = button_icon(label) {
         row![
