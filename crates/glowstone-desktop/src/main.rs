@@ -4,6 +4,7 @@ mod auth;
 mod curseforge;
 mod game;
 mod horizon_mods;
+mod instance_tools;
 mod mods;
 mod modpacks;
 mod store;
