@@ -1,5 +1,5 @@
 //! Modrinth search and per-instance Java mod installation.
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tokio::task::JoinSet;
 
@@ -60,6 +60,7 @@ pub struct InstalledModFile {
     pub version: String,
     pub size: u64,
     pub managed: bool,
+    pub icon_data: Option<Vec<u8>>,
 }
 
 
@@ -331,6 +332,12 @@ pub fn local_files(instance_id: &str) -> Result<Vec<InstalledModFile>, String> {
     let directory = store::instance_directory(instance_id)?.join("mods");
     std::fs::create_dir_all(&directory)
         .map_err(|error| format!("Не удалось открыть каталог модов: {error}"))?;
+    let mut managed_icons: HashMap<String, Vec<u8>> = HashMap::new();
+    for item in installed(instance_id)? {
+        if let Some(bytes) = item.icon_data {
+            managed_icons.insert(item.file_name, bytes);
+        }
+    }
     let managed_names: HashSet<String> = read_manifest(instance_id)?.mods
         .into_iter()
         .filter_map(|item| safe_filename(&item.file_name).map(str::to_owned))
@@ -356,41 +363,66 @@ pub fn local_files(instance_id: &str) -> Result<Vec<InstalledModFile>, String> {
             continue;
         }
         let file_name = entry.file_name().to_string_lossy().into_owned();
-        let (title, version) = read_mod_jar_metadata(&path);
+        let (title, version, embedded_icon) = read_mod_jar_metadata(&path);
+        let icon_data = embedded_icon.or_else(|| managed_icons.get(&file_name).cloned());
         result.push(InstalledModFile {
             managed: managed_names.contains(&file_name),
             title,
             version,
             file_name,
             size: metadata.len(),
+            icon_data,
         });
     }
     result.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
     Ok(result)
 }
 
-fn read_mod_jar_metadata(path: &Path) -> (String, String) {
+/// Scans a profile's mod directory off the Iced UI thread.
+pub async fn local_files_async(instance_id: String) -> Result<Vec<InstalledModFile>, String> {
+    tokio::task::spawn_blocking(move || local_files(&instance_id))
+        .await
+        .map_err(|error| format!("Не удалось просканировать моды в фоновой задаче: {error}"))?
+}
+
+fn read_mod_jar_metadata(path: &Path) -> (String, String, Option<Vec<u8>>) {
     use std::io::Read as _;
     let fallback = path.file_stem().and_then(|value| value.to_str())
         .unwrap_or("Minecraft mod").to_owned();
     let Ok(file) = std::fs::File::open(path) else {
-        return (fallback, "unknown".to_owned());
+        return (fallback, "unknown".to_owned(), None);
     };
     let Ok(mut archive) = zip::ZipArchive::new(file) else {
-        return (fallback, "unknown".to_owned());
+        return (fallback, "unknown".to_owned(), None);
     };
     for metadata_path in ["fabric.mod.json", "quilt.mod.json"] {
         let Ok(mut metadata_file) = archive.by_name(metadata_path) else { continue };
         let mut content = String::new();
         if metadata_file.read_to_string(&mut content).is_err() { continue; }
+        drop(metadata_file);
         if let Ok(value) = serde_json::from_str::<Value>(&content) {
             let name = value["name"].as_str().or_else(|| value["id"].as_str())
                 .unwrap_or(&fallback).to_owned();
             let version = value["version"].as_str().unwrap_or("unknown").to_owned();
-            return (name, version);
+            let icon_path = value["icon"].as_str().or_else(|| {
+                value["icon"].as_object().and_then(|icons| {
+                    icons.iter().next().and_then(|(_, path)| path.as_str())
+                })
+            });
+            let icon_data = icon_path.and_then(|icon_path| {
+                let mut icon_file = archive.by_name(icon_path).ok()?;
+                let mut bytes = Vec::new();
+                icon_file.take((MAX_ICON_BYTES + 1) as u64).read_to_end(&mut bytes).ok()?;
+                if bytes.len() <= MAX_ICON_BYTES && looks_like_image(&bytes) {
+                    Some(bytes)
+                } else {
+                    None
+                }
+            });
+            return (name, version, icon_data);
         }
     }
-    (fallback, "metadata unavailable".to_owned())
+    (fallback, "metadata unavailable".to_owned(), None)
 }
 
 /// Safely removes one JAR by its file name. Manifest entries are pruned by the
