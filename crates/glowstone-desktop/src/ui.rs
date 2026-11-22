@@ -2311,8 +2311,8 @@ pub fn update(app: &mut App, message: Message) -> iced::Task<Message> {
             });
         }
         Message::OpenCurseForgeApiApplication => {
-            app.notice = Some(match webbrowser::open("https://support.curseforge.com/support/solutions/articles/9000208346-about-the-curseforge-api-and-how-to-apply-for-a-key?locale=en") {
-                Ok(()) => "Открываю официальную инструкцию CurseForge по получению API key.".to_owned(),
+            app.notice = Some(match webbrowser::open("https://forms.monday.com/forms/dce5ccb7afda9a1c21dab1a1aa1d84eb?r=use1") {
+                Ok(()) => "Открываю официальную форму заявки CurseForge API.".to_owned(),
                 Err(error) => format!("Не удалось открыть инструкцию CurseForge: {error}"),
             });
         }
@@ -2341,9 +2341,9 @@ pub fn subscription(app: &App) -> iced::Subscription<Message> {
         );
     }
 
-    if app.data.settings.discord_rpc_enabled
-        && app.discord_rpc_status != "Discord Rich Presence подключён."
-    {
+    // Poll even after a successful handshake: Discord may be closed or restarted
+    // while GlowstoneCL is running. set_presence() detects a stale pipe and reconnects.
+    if app.data.settings.discord_rpc_enabled {
         subscriptions.push(
             iced::time::every(std::time::Duration::from_secs(15))
                 .map(|_| Message::RetryDiscordRpc),
@@ -5113,7 +5113,7 @@ fn settings_page(app: &App) -> Element<'_, Message> {
                         text(if app.curseforge_api_key_configured {
                             "Ключ сохранён в системном хранилище. Его значение не записывается в state.json."
                         } else {
-                            "Вставь API key, созданный в панели CurseForge. Без него поиск и скачивание недоступны."
+                            "Для стороннего лаунчера API key нужно запросить у CurseForge через форму разработчика. После одобрения вставь ключ сюда; он сохранится только в системном хранилище."
                         }).size(9).color(MUTED),
                     ].spacing(5),
                     Space::new().width(Length::Fill),
